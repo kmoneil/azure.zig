@@ -18,6 +18,44 @@ pub fn Engine(comptime log_scope: @EnumLiteral()) type {
     return rest_core.Engine(log_scope, Hook);
 }
 
+/// ARM's retry policy, as azcore's: four attempts, the first retry within
+/// 800 ms, and a server's delay honoured up to a minute. ARM's 429s can ask
+/// for longer; such a call returns at once, the delay in `Diagnostics`, for
+/// the caller to schedule.
+pub const retry_policy: rest_core.RetryPolicy = .{
+    .max_attempts = 4,
+    .initial_backoff_ms = 800,
+    .max_backoff_ms = 60_000,
+};
+
+/// The engine's headers for every ARM call: ARM echoes the call's own
+/// `x-ms-client-request-id` when asked to.
+pub const engine_headers = [_]transport.Header{
+    .{ .name = "x-ms-return-client-request-id", .value = "true" },
+};
+
+/// A fresh `x-ms-client-request-id`, a random (version 4) UUID: one per
+/// call, the same on each of its attempts, so a call can be matched to
+/// ARM's records of it.
+pub fn clientRequestId(io: std.Io) [36]u8 {
+    var bytes: [16]u8 = undefined;
+    io.random(&bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = std.fmt.bytesToHex(bytes, .lower);
+    var out: [36]u8 = undefined;
+    var at: usize = 0;
+    for ([_][2]usize{ .{ 0, 8 }, .{ 8, 12 }, .{ 12, 16 }, .{ 16, 20 }, .{ 20, 32 } }, 0..) |span, i| {
+        if (i > 0) {
+            out[at] = '-';
+            at += 1;
+        }
+        @memcpy(out[at..][0 .. span[1] - span[0]], hex[span[0]..span[1]]);
+        at += span[1] - span[0];
+    }
+    return out;
+}
+
 /// What rest-core's loop asks of a cloud, answered for ARM.
 pub const Hook = struct {
     /// What a refused response is.
@@ -211,6 +249,20 @@ test "operationState: terminal states in any case, the rest running" {
     try testing.expectEqual(.canceled, operationState("Cancelled"));
     for ([_][]const u8{ "InProgress", "Accepted", "Creating", "Updating", "" }) |s| {
         try testing.expectEqual(.running, operationState(s));
+    }
+}
+
+test "clientRequestId: a version 4 UUID, new each time" {
+    var clock: rest_core.testing.FakeClock = .{};
+    const a = clientRequestId(clock.io());
+    const b = clientRequestId(clock.io());
+    try testing.expect(!std.mem.eql(u8, &a, &b));
+    for ([_]usize{ 8, 13, 18, 23 }) |i| try testing.expectEqual('-', a[i]);
+    try testing.expectEqual('4', a[14]);
+    try testing.expect(std.mem.indexOfScalar(u8, "89ab", a[19]) != null);
+    for (a, 0..) |c, i| {
+        if (i == 8 or i == 13 or i == 18 or i == 23) continue;
+        try testing.expect(std.ascii.isHex(c) and !std.ascii.isUpper(c));
     }
 }
 

@@ -16,3 +16,15 @@ Until 1.0, minor versions may break the API; each entry says how.
   with the provider's request id, Azure's retried set (408, 429, 500, 502,
   503, 504), an unregistered provider as an error of its own, next pages
   and operation URLs followed only on ARM's origin, and operation states.
+- `core.Cloud`: the public, China and US Government clouds, each with its
+  authority host, ARM endpoint and scope, and storage suffix.
+- `core.arm.retry_policy` (four attempts, from 800 ms, a server's delay
+  honoured up to a minute), `engine_headers`, and `clientRequestId`, a
+  version 4 UUID for one call's every attempt.
+- `core.operation`: long-running ARM writes begun, polled, waited on with
+  a time limit, and read, through `Azure-AsyncOperation`,
+  `Operation-Location`, `Location` or the resource's `provisioningState`,
+  each poll waiting what the last answer asked. A failed operation is an
+  answer, with the error its body carried.
+- `core.testing`: rest-core's fakes, ARM's error bodies and refusals, and a
+  long-running operation scripted as ARM answers one.

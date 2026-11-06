@@ -4,8 +4,9 @@
 //! HTTP transport with a per-request time limit, the request loop with
 //! retries that honour the delay a server asks for, a token-provider seam
 //! through which credentials reach every service, RFC 3339 and HTTP dates,
-//! RSA signing, and fakes for tests. What is Azure's own is here: `arm`,
-//! Resource Manager's side of the loop.
+//! RSA signing, and fakes for tests. What is Azure's own is here: its
+//! clouds, Resource Manager's side of the loop, and its long-running
+//! operations.
 
 const rest_core = @import("rest_core");
 
@@ -24,14 +25,23 @@ pub const Owned = rest_core.Owned;
 pub const WipingAllocator = rest_core.WipingAllocator;
 pub const logging = rest_core.logging;
 
-/// Fakes and property-test helpers, for tests only.
-pub const testing = rest_core.testing;
+/// Fakes and helpers, for tests only: rest-core's, and ARM's answers.
+pub const testing = @import("testing.zig");
 
-/// Azure Resource Manager: its refusals, retries, pages and operations.
+/// Azure's clouds: where each one's sign-in, ARM and Storage are.
+pub const Cloud = @import("Cloud.zig");
+
+/// Azure Resource Manager: its refusals, retries, pages and operation URLs.
 pub const arm = @import("arm.zig");
+
+/// Long-running ARM operations: begun, polled, waited on, and read.
+pub const operation = @import("operation.zig");
 
 test {
     @import("std").testing.refAllDecls(@This());
+    _ = @import("Cloud.zig");
     _ = @import("arm.zig");
+    _ = @import("operation.zig");
+    _ = @import("testing.zig");
     _ = @import("rest_core_test.zig");
 }
