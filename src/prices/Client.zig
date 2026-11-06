@@ -251,7 +251,7 @@ fn writeFilter(w: *std.Io.Writer, query: types.Query) std.Io.Writer.Error!void {
 fn nextPath(self: *Client, link: ?[]const u8, current: []const u8) Error!?[]const u8 {
     const next = link orelse return null;
     if (next.len == 0) return null;
-    const path = core.origin.pathOnOrigin(self.engine.base_url, next) orelse {
+    const path = core.loop.pathOnOrigin(self.engine.base_url, next) orelse {
         if (self.engine.diagnostics) |d| d.print("a NextPageLink is not on {s}", .{self.engine.base_url});
         return error.InvalidEndpoint;
     };

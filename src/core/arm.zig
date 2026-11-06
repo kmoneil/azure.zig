@@ -12,7 +12,6 @@ const Allocator = std.mem.Allocator;
 const rest_core = @import("rest_core");
 const transport = rest_core.transport;
 const Diagnostics = rest_core.Diagnostics;
-const origin = @import("origin.zig");
 
 const log = rest_core.logging.Scoped(.azure_arm);
 
@@ -184,7 +183,7 @@ fn isUnregistered(code: []const u8) bool {
 pub fn nextPagePath(base_url: []const u8, next_link: ?[]const u8) error{InvalidEndpoint}!?[]const u8 {
     const link = next_link orelse return null;
     if (link.len == 0) return null;
-    return origin.pathOnOrigin(base_url, link) orelse error.InvalidEndpoint;
+    return rest_core.loop.pathOnOrigin(base_url, link) orelse error.InvalidEndpoint;
 }
 
 /// Where a long-running operation is polled, and how its answer reads.

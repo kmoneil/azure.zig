@@ -10,7 +10,7 @@ Until 1.0, minor versions may break the API; each entry says how.
   gnarl (0.7.0, named in `complexity.zon`): a zigvet finding, or a
   function newly over its complexity limit or worse than
   `complexity.baseline`, fails it.
-- `core` builds on rest-core v0.2.0 (21dace6), pinned by hash; 0.2.0 came
+- `core` builds on rest-core v0.2.1 (915d327), pinned by hash; 0.2.0 came
   from azure.zig's trial of 0.1.0 and brings HEAD, a success's status and
   headers through `execute`, and ARM's correlation id, which ARM's hook now
   keeps in `Diagnostics` beside the request id, both logged escaped at
@@ -32,10 +32,11 @@ Until 1.0, minor versions may break the API; each entry says how.
   answer, with the error its body carried.
 - `core.testing`: rest-core's fakes, ARM's error bodies and refusals, and a
   long-running operation scripted as ARM answers one.
-- `core.origin.pathOnOrigin`: a link a server gives is followed when it
-  names the client's origin as origins compare, the default port written
-  out or not and the host in any case; ARM's next pages and operation URLs
-  use it.
+- A link a server gives (ARM's next pages and operation URLs, the Retail
+  Prices API's next pages) is followed when it names the client's origin
+  as origins compare, the default port written out or not and the host in
+  any case: rest-core 0.2.1's `loop.pathOnOrigin`, fixed for the prices
+  API's `:443` links that azure.zig found.
 - `core.crc64`: CRC-64/NVME, Blob Storage's `x-ms-content-crc64`: a
   carry-less fold of four lanes where the CPU multiplies without carries
   (PCLMULQDQ with AVX, PMULL), eight tables elsewhere; `Hasher`, `combine`

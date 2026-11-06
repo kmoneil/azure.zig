@@ -250,11 +250,10 @@ test "rest-core: a list's next pages are followed on ARM's origin, and only ther
         "https://management.azure.com@evil.example/subscriptions",
         "http://management.azure.com/subscriptions",
     }) |link| try testing.expectError(error.InvalidEndpoint, arm.nextPagePath(arm_url, link));
-    // rest-core's own compares bytes, so the default port written out, as
-    // the Retail Prices API writes every next page, or the host in another
-    // case, is another origin to it (rest-core t39); core's compares
-    // origins, and takes both.
-    try testing.expectEqual(null, rest_core.loop.pathOnOrigin(arm_url, "https://management.azure.com:443/subscriptions"));
+    // The default port written out, as the Retail Prices API writes every
+    // next page, and the host in another case are the same origin (rest-core
+    // 0.2.1, its t39, from azure.zig's t23).
+    try testing.expectEqualStrings("/subscriptions", rest_core.loop.pathOnOrigin(arm_url, "https://management.azure.com:443/subscriptions").?);
     try testing.expectEqualStrings("/subscriptions", (try arm.nextPagePath(arm_url, "https://management.azure.com:443/subscriptions")).?);
     try testing.expectEqualStrings("/subscriptions", (try arm.nextPagePath(arm_url, "https://Management.Azure.com/subscriptions")).?);
 

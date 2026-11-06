@@ -111,11 +111,11 @@ pinned in `build.zig.zon` by its content hash. To move to another
 release, fetch its tag and check what Zig resolved:
 
 ```sh
-zig fetch --save=rest_core "git+https://github.com/kmoneil/rest-core.zig#v0.2.0"
-git ls-remote https://github.com/kmoneil/rest-core.zig 'refs/tags/v0.2.0^{}'
+zig fetch --save=rest_core "git+https://github.com/kmoneil/rest-core.zig#v0.2.1"
+git ls-remote https://github.com/kmoneil/rest-core.zig 'refs/tags/v0.2.1^{}'
 ```
 
-The fetch must say `resolved ref "v0.2.0"`, and the commit it names must
+The fetch must say `resolved ref "v0.2.1"`, and the commit it names must
 be the one `ls-remote` prints. The tag goes after `#`: given as `?ref=`,
 `zig fetch` takes the default branch instead and saves a URL that looks
 right. Zig unpacks fetched packages into `zig-pkg/`, which git ignores.
