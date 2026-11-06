@@ -1,0 +1,4 @@
+# Every text file keeps LF on every platform. zig fmt --check reads the
+# bytes as committed; a Windows runner would otherwise check text out with
+# CRLF, and every file would fail it (as CI's first Windows run did).
+* text=auto eol=lf
