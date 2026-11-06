@@ -1,7 +1,9 @@
 # Contributing
 
 Bug reports, fixes and improvements are welcome. For anything larger than a
-small fix, open an issue first so the approach can be agreed on.
+small fix, open an issue first so the approach can be agreed on. `main`
+takes changes by pull request only, merged by rebase once every CI check
+passes on it.
 
 ## Setup
 

@@ -1,5 +1,9 @@
 # azure.zig
 
+[![CI](https://github.com/kmoneil/azure.zig/actions/workflows/ci.yml/badge.svg?branch=main&event=push)](https://github.com/kmoneil/azure.zig/actions/workflows/ci.yml)
+[![Zig 0.17.1](https://img.shields.io/badge/zig-0.17.1-F7A41D?logo=zig&logoColor=white)](https://ziglang.org/download/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-0078D4)](LICENSE)
+
 **Azure clients for Zig 0.17.1, written against the REST APIs.**
 One package, `azure`, with a module per service over a shared core: an
 application compiles only the modules it imports. Its one dependency is
