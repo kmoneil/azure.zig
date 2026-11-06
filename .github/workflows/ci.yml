@@ -45,6 +45,18 @@ jobs:
       - name: zig build test
         run: zig build test --summary all
 
+  # Every relative link and anchor in the Markdown resolves, every page is
+  # linked from another, and each block the guides mark as a snippet is the
+  # code in examples/ or tests/docs_examples.zig, which `test` compiles.
+  docs:
+    name: docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: tools/check_docs.py
+        run: python3 -I tools/check_docs.py
+
   # A program builds this package in the mode it ships, and in ReleaseFast
   # `unreachable`, overflow and a bad cast are undefined rather than a
   # panic.

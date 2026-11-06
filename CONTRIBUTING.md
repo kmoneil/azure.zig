@@ -26,6 +26,8 @@ zig build coverage      # line coverage, into zig-out/coverage
 ## Before a commit
 
 - `zig build test` passes, and prints nothing from zigvet or gnarl.
+- `python3 -I tools/check_docs.py` passes: a guide's code block marked as a
+  snippet is the code in `examples/` or `tests/docs_examples.zig`.
 - `gnarl --diff HEAD` shows no function newly over its limit. A new
   function over a critical limit is refactored, not added to
   `complexity.baseline`.

@@ -9,6 +9,7 @@ never sends any. Measured against the API on 2026-11-06; the live suite
 
 ## A first program
 
+<!-- snippet: examples/prices_spot.zig -->
 ```zig
 const std = @import("std");
 const prices = @import("prices");
@@ -87,6 +88,7 @@ sending, and `InvalidResponse` for an answer that is not the API's JSON.
 those to leave out included; `addRow` adds any row. It filters by the
 OData the client sends, with case, and pages with production's links.
 
+<!-- snippet: tests/docs_examples.zig#fake-prices -->
 ```zig
 var fake: prices.testing.FakePrices = .init(gpa);
 defer fake.deinit();

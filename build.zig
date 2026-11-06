@@ -165,8 +165,46 @@ pub fn build(b: *std.Build) void {
     azure_step.dependOn(&streamed(b, prices_azure_tests).step);
     test_step.dependOn(&prices_azure_tests.step);
 
-    // Examples, one `example-<name>` step per examples/<name>.zig, join with
-    // the first module that has one; `zig build test` compiles them all.
+    // The code the guides show, run beside the unit tests so it cannot
+    // drift; tools/check_docs.py holds the guides to this file and to the
+    // examples.
+    const docs_tests = b.addTest(.{
+        .name = "docs-examples",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/docs_examples.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "resources", .module = resources },
+                .{ .name = "prices", .module = prices },
+            },
+        }),
+        .filters = test_filters,
+        .test_runner = test_runner,
+    });
+    if (only_module == null) unit_step.dependOn(&b.addRunArtifact(docs_tests).step);
+
+    // One `example-<name>` step per examples/<name>.zig, each importing the
+    // module it shows; `zig build test` compiles them all, so none rots.
+    const examples = [_]struct { []const u8, []const u8, *std.Build.Module }{
+        .{ "prices_spot", "prices", prices },
+        .{ "resources_subscriptions", "resources", resources },
+    };
+    for (examples) |example| {
+        const exe = b.addExecutable(.{
+            .name = example[0],
+            .root_module = b.createModule(.{
+                .root_source_file = b.path(b.fmt("examples/{s}.zig", .{example[0]})),
+                .target = target,
+                .optimize = optimize,
+                .imports = &.{.{ .name = example[1], .module = example[2] }},
+            }),
+        });
+        const run = b.addRunArtifact(exe);
+        run.addPassthruArgs();
+        b.step(b.fmt("example-{s}", .{example[0]}), b.fmt("Run examples/{s}.zig", .{example[0]})).dependOn(&run.step);
+        test_step.dependOn(&exe.step);
+    }
 
     // How fast this build computes a CRC-64/NVME, always in ReleaseFast: the
     // numbers are about the code the CPU runs, not a debug build's.
@@ -191,9 +229,8 @@ pub fn build(b: *std.Build) void {
     // that is almost certainly wrong, such as a pointer to stack memory that
     // leaves its function. A program on the PATH, not a package. Quiet on a
     // clean tree, and run every time: a command whose output is not captured
-    // has side effects, so the build never caches it. examples/ joins the
-    // list when it exists.
-    const lint = b.addSystemCommand(&.{ "zigvet", "build.zig", "src", "tests", "tools" });
+    // has side effects, so the build never caches it.
+    const lint = b.addSystemCommand(&.{ "zigvet", "build.zig", "src", "tests", "examples", "tools" });
     lint.setCwd(b.path("."));
     b.step("lint", "Report code that compiles but is wrong (zigvet, from the PATH; test runs it too)").dependOn(&lint.step);
     test_step.dependOn(&lint.step);
@@ -213,7 +250,7 @@ pub fn build(b: *std.Build) void {
     b.step("complexity", "Fail a function newly over its complexity limit, or worse than complexity.baseline (gnarl, from the PATH; test runs it too)").dependOn(&complexity.step);
     test_step.dependOn(&complexity.step);
 
-    const fmt_paths = b.pathList(&.{ "build.zig", "build.zig.zon", "complexity.zon", "src", "tests", "tools" });
+    const fmt_paths = b.pathList(&.{ "build.zig", "build.zig.zon", "complexity.zon", "src", "tests", "examples", "tools" });
     test_step.dependOn(&b.addFmt(.{ .paths = fmt_paths, .check = true }).step);
     b.step("fmt", "Format the Zig in build.zig, complexity.zon, src/ and tools/").dependOn(&b.addFmt(.{ .paths = fmt_paths }).step);
 }

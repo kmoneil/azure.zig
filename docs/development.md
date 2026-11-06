@@ -19,10 +19,19 @@ zig build test-integration             # against Azurite (no suites yet)
 zig build test-integration-azure       # against Azure (no suites yet)
 zig build coverage                     # line coverage; needs kcov
 zig build bench-crc64                  # how fast this machine computes CRC-64/NVME
+zig build example-prices_spot          # an example, one step per examples/<name>.zig
+python3 -I tools/check_docs.py         # the docs' links, anchors and snippets
 zig build fmt                          # format the Zig
 zig build lint                         # zigvet: code that compiles but is wrong
 zig build complexity                   # gnarl --check: complexity against complexity.baseline
 ```
+
+A code block a guide shows follows `<!-- snippet: examples/<name>.zig -->`
+or `<!-- snippet: tests/docs_examples.zig#<name> -->`, and
+`tools/check_docs.py` (gcp.zig's, carried unchanged) holds it to that
+file, which `zig build test` compiles and, for tests/docs_examples.zig,
+runs: change the code and the guide together. It also checks every
+relative link and anchor, and that every page is linked from another.
 
 `zig build test` runs `lint` and `complexity` and checks formatting, so a
 zigvet finding, a function newly over its complexity limit, or a file
@@ -126,3 +135,4 @@ in either can be carried to the other.
 | File here | From gcp.zig | At |
 | --- | --- | --- |
 | tools/test_runner.zig | tools/test_runner.zig | eae944c |
+| tools/check_docs.py | tools/check_docs.py | eae944c |

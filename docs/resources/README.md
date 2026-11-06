@@ -14,15 +14,20 @@ has run.
 
 ## A first program
 
+<!-- snippet: examples/resources_subscriptions.zig -->
 ```zig
 const std = @import("std");
 const resources = @import("resources");
 
 pub fn main(init: std.process.Init) !void {
     const gpa = init.gpa;
-    // Until auth lands, a token from `tools/azure-token.sh` or
-    // `az account get-access-token --query accessToken -o tsv`.
-    var token: resources.StaticToken = .{ .token = init.environ_map.get("AZURE_TOKEN").? };
+    // A token from tools/azure-token.sh, or from the Azure CLI:
+    // az account get-access-token --query accessToken -o tsv
+    const text = init.environ_map.get("AZURE_TOKEN") orelse {
+        std.debug.print("set AZURE_TOKEN to a Resource Manager token\n", .{});
+        return;
+    };
+    var token: resources.StaticToken = .{ .token = std.mem.trim(u8, text, &std.ascii.whitespace) };
     var diag: resources.Diagnostics = .{};
     var client: resources.Client = try .init(gpa, init.io, .{
         .token_provider = token.provider(),
@@ -30,7 +35,10 @@ pub fn main(init: std.process.Init) !void {
     });
     defer client.deinit();
 
-    var subs = try client.listSubscriptions();
+    var subs = client.listSubscriptions() catch |err| {
+        std.debug.print("{t}: {f}\n", .{ err, diag });
+        return err;
+    };
     defer subs.deinit();
     for (subs.value) |s| std.debug.print("{s}  {s}  {t}\n", .{ s.id, s.display_name, s.state });
 }
@@ -73,8 +81,10 @@ names hold none of `<>%&\?/`. `limits` has the rules.
 
 ## Listing by tag
 
+<!-- snippet: tests/docs_examples.zig#list-by-tag -->
 ```zig
 var mine = try client.listResourceGroups(sub, .{ .name = "azzig-run", .value = run });
+defer mine.deinit();
 ```
 
 The filter goes to ARM as OData (`tagName eq '...' and tagValue eq '...'`,
@@ -111,6 +121,7 @@ lists paged (`page_size`), filters by tag, and a delete that answers 202
 for `delete_polls` polls before the group is gone. Give the client
 `testing.FakeClock`'s `io` and the polls take no time.
 
+<!-- snippet: tests/docs_examples.zig#fake-resources -->
 ```zig
 var fake: resources.testing.FakeResources = .init(gpa);
 defer fake.deinit();

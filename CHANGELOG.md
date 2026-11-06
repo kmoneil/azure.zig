@@ -42,6 +42,11 @@ Until 1.0, minor versions may break the API; each entry says how.
   for parts hashed apart, and the header's base64 both ways, refusing any
   but the canonical twelve characters. 13 GiB/s on an Apple M5 in
   ReleaseFast (std's one table, 533 MiB/s); `zig build bench-crc64`.
+- The guides' code is code: each first program is an example
+  (`zig build example-prices_spot`, `example-resources_subscriptions`),
+  the snippets on testing with the fakes run in `tests/docs_examples.zig`,
+  and `tools/check_docs.py` (gcp.zig's) holds every marked block to its
+  source, beside the links and anchors; CI runs it.
 - `resources`: subscriptions listed; resource groups made (201, or 200 with
   the spec's tags), read, listed by tag through ARM's OData filter, and
   deleted as a long-running operation, with `force_vms`; providers read
