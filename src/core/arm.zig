@@ -14,6 +14,8 @@ const transport = rest_core.transport;
 const Diagnostics = rest_core.Diagnostics;
 const origin = @import("origin.zig");
 
+const log = rest_core.logging.Scoped(.azure_arm);
+
 /// The request loop over ARM, logging under `log_scope`.
 pub fn Engine(comptime log_scope: @EnumLiteral()) type {
     return rest_core.Engine(log_scope, Hook);
@@ -85,16 +87,32 @@ pub const Hook = struct {
         Refused,
     };
 
-    /// Reads a refused response into `diagnostics`, the provider's own
-    /// request id with it, and returns its error.
+    /// Reads a refused response into `diagnostics` and returns its error.
     pub fn refusal(scratch: Allocator, res: transport.Response, diagnostics: ?*Diagnostics) (RefusalError || Allocator.Error) {
         const body = try readError(scratch, res.body);
-        if (diagnostics) |d| {
-            d.set(res.status, body.code orelse "", body.message orelse res.body);
-            if (res.header("x-ms-request-id")) |id| d.setRequestId(id);
-        }
+        record(res, body, diagnostics);
         if (body.code) |code| if (isUnregistered(code)) return error.ProviderNotRegistered;
-        return switch (res.status) {
+        return errorFor(res.status);
+    }
+
+    /// The refusal in `diagnostics`, with its two ids: the resource
+    /// provider's `x-ms-request-id`, and ARM's own
+    /// `x-ms-correlation-request-id`, the one Azure support asks for first.
+    /// Both are logged at debug level, escaped, since a server wrote them.
+    fn record(res: transport.Response, body: ErrorBody, diagnostics: ?*Diagnostics) void {
+        const request_id = res.header("x-ms-request-id");
+        const correlation_id = res.header("x-ms-correlation-request-id");
+        log.debug("refused {d}: request {f}, correlation {f}", .{
+            res.status, rest_core.logging.escaped(request_id orelse "-"), rest_core.logging.escaped(correlation_id orelse "-"),
+        });
+        const d = diagnostics orelse return;
+        d.set(res.status, body.code orelse "", body.message orelse res.body);
+        if (request_id) |id| d.setRequestId(id);
+        if (correlation_id) |id| d.setCorrelationId(id);
+    }
+
+    fn errorFor(status: u16) RefusalError {
+        return switch (status) {
             400 => error.BadRequest,
             401 => error.Unauthenticated,
             403 => error.PermissionDenied,

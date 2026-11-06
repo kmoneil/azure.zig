@@ -10,7 +10,11 @@ Until 1.0, minor versions may break the API; each entry says how.
   gnarl (0.7.0, named in `complexity.zon`): a zigvet finding, or a
   function newly over its complexity limit or worse than
   `complexity.baseline`, fails it.
-- `core` builds on rest-core v0.1.0, pinned by hash: its transport, request
+- `core` builds on rest-core v0.2.0 (21dace6), pinned by hash; 0.2.0 came
+  from azure.zig's trial of 0.1.0 and brings HEAD, a success's status and
+  headers through `execute`, and ARM's correlation id, which ARM's hook now
+  keeps in `Diagnostics` beside the request id, both logged escaped at
+  debug level. Its transport, request
   loop, token seam, RSA signing and fakes. `core.arm` is Resource
   Manager's side of the loop: ARM's error body read into `Diagnostics`
   with the provider's request id, Azure's retried set (408, 429, 500, 502,

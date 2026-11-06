@@ -157,7 +157,7 @@ pub fn result(engine: anytype, arena: Allocator, op: *const Operation) Error(@Ty
             .original_uri => try get(engine, arena, op.resource_path),
             .azure_async_operation => op.final_body,
         },
-        .GET => op.final_body,
+        .GET, .HEAD => op.final_body,
     };
 }
 

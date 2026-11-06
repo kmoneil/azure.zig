@@ -9,8 +9,8 @@
     // zig fetch --save=rest_core "git+https://github.com/kmoneil/rest-core.zig#<tag>"
     .dependencies = .{
         .rest_core = .{
-            .url = "git+https://github.com/kmoneil/rest-core.zig?ref=v0.1.0#f2508622699df39a556d45fe9a4cf0703c0fc632",
-            .hash = "rest_core-0.1.0-rTJs5L0PCADPx4qqtzSTUfETOcJxb2rm0r6k8lzoC7r8",
+            .url = "git+https://github.com/kmoneil/rest-core.zig?ref=v0.2.0#21dace67e7e453e96173ca76eda3513f3a5217d8",
+            .hash = "rest_core-0.2.0-rTJs5HVkCABVwACNnm7bvEMYLL3f7uj-5Z4rjIQnIed3",
         },
     },
     .paths = .{ "build.zig", "build.zig.zon", "src", "LICENSE", "README.md", "CHANGELOG.md" },

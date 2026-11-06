@@ -89,6 +89,7 @@ test "createResourceGroup: one already in another location is Conflict, with ARM
     try testing.expectError(error.Conflict, rig.client.createResourceGroup(sub, "rg-1", .{ .location = "eastus2" }));
     try testing.expectEqualStrings("InvalidResourceGroupLocation", rig.diag.code());
     try testing.expectEqualStrings("fa4e0000-0000-4000-8000-000000000001", rig.diag.requestId());
+    try testing.expectEqualStrings("fa4e0000-0000-4000-8000-000000000002", rig.diag.correlationId());
 }
 
 test "getResourceGroup: a group, and NotFound for one not there" {

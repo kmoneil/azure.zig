@@ -82,8 +82,8 @@ test "rest-core: ARM's refusal reads into Diagnostics, with the provider's reque
     try testing.expectEqualStrings("ResourceNotFound", rig.diag.code());
     try testing.expectStringStartsWith(rig.diag.message(), "The Resource 'Microsoft.Compute/virtualMachines/vm-1'");
     try testing.expectEqualStrings("4b5c1d2e-0000-4000-8000-000000000001", rig.diag.requestId());
-    // ARM's own x-ms-correlation-request-id, the id Azure support asks for
-    // first, has nowhere to go: Diagnostics keeps one id.
+    // ARM's own, the id Azure support asks for first (rest-core 0.2.0).
+    try testing.expectEqualStrings("9f8e7d6c-0000-4000-8000-000000000002", rig.diag.correlationId());
 }
 
 test "rest-core: a provider the subscription has not registered is an error of its own" {
@@ -356,7 +356,7 @@ test "rest-core: a long-running PUT is polled at its Azure-AsyncOperation URL, w
     try testing.expectEqualStrings("application/json", (try rig.fake.streamRequest(0)).content_type.?);
 }
 
-test "rest-core: a Location poll is told apart by its status, which only executeStream returns" {
+test "rest-core: a Location poll is told apart by its status, through executeStream or execute's head_out" {
     const location = "https://management.azure.com/subscriptions/sub-1/operationresults/op-2?api-version=2021-04-01";
     const script = [_]FakeTransport.Reply{
         .{ .respond = .{ .status = 202, .headers = &.{ .{ .name = "Location", .value = location }, .{ .name = "Retry-After", .value = "1" } }, .body = "" } },
@@ -390,11 +390,30 @@ test "rest-core: a Location poll is told apart by its status, which only execute
         delay_ms = pollDelayMs(io, answer.headers);
         const running = answer.status == 202;
         _ = response.reset(.retain_capacity);
-        // To `execute`, a 202 and a 204 are both an empty body.
         if (!running) break;
     }
     try testing.expectEqual(2, polls);
     try testing.expectEqual(1_000, rig.clock.sleepMs(1));
+}
+
+test "rest-core: execute's head_out gives a success's status and headers (0.2.0)" {
+    const script = [_]FakeTransport.Reply{
+        .{ .respond = .{ .status = 202, .headers = &.{.{ .name = "Location", .value = "https://management.azure.com/subscriptions/sub-1/operationresults/op-3" }}, .body = "" } },
+        .{ .respond = .{ .status = 204, .body = "" } },
+    };
+    var rig: Rig = .init(&script);
+    defer rig.deinit();
+    var response: std.heap.ArenaAllocator = .init(testing.allocator);
+    defer response.deinit();
+    const engine = rig.engine();
+
+    var head: ?transport.StreamRequest.Head = null;
+    engine.begin();
+    _ = try engine.execute(&response, .{ .method = .DELETE, .path = "/subscriptions/sub-1/resourcegroups/rg-1?api-version=2021-04-01", .head_out = &head });
+    try testing.expectEqual(202, head.?.status);
+    try testing.expectStringEndsWith(head.?.header("location").?, "/operationresults/op-3");
+    _ = try engine.execute(&response, .{ .method = .GET, .path = "/subscriptions/sub-1/operationresults/op-3", .head_out = &head });
+    try testing.expectEqual(204, head.?.status);
 }
 
 /// A client secret's token from Entra's token endpoint: a sketch, to show
