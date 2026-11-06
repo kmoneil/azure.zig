@@ -22,10 +22,18 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "rest_core", .module = rest_core }},
     });
 
-    // The service modules join here as each lands: auth, storage, compute,
-    // imds, resources, prices and network, each at src/<name>/root.zig.
-    // Each imports core alone, never auth or another service: credentials
-    // reach a service through core's TokenProvider seam.
+    // The service modules, each at src/<name>/root.zig, as each lands: auth,
+    // storage, compute, imds, prices and network to come. Each imports core
+    // alone, never auth or another service: credentials reach a service
+    // through core's TokenProvider seam.
+
+    // Resource Manager's basics: subscriptions, resource groups, providers.
+    const resources = b.addModule("resources", .{
+        .root_source_file = b.path("src/resources/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "core", .module = core }},
+    });
 
     // Every test build runs under std's test runner with one fix, which
     // keeps std.debug from swallowing a task's cancel (see the top of
@@ -46,10 +54,11 @@ pub fn build(b: *std.Build) void {
     // `zig build test -Dfuzz-runner --fuzz` fuzzes the same tests.
     const unit_modules = [_]UnitModule{
         .{ "core", core },
+        .{ "resources", resources },
     };
     // One module's tests alone, for a fuzzing job that gives one module the
     // whole time budget.
-    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core");
+    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core or resources");
     if (only_module) |name| checkModule(&unit_modules, name);
 
     const test_step = b.step("test", "Run unit, property and fuzz-corpus tests, zig fmt --check, zigvet and gnarl");
@@ -107,13 +116,31 @@ pub fn build(b: *std.Build) void {
         "Run the integration suites against Azurite (none yet)",
     );
     // And against Azure itself, with credentials CI does not have, so a step
-    // of its own, never part of `test-integration`. `zig build test` will
-    // compile these suites, as it does the examples, so none can rot
-    // between runs.
-    _ = b.step(
+    // of its own, never part of `test-integration`. `zig build test`
+    // compiles these suites, as it will the examples, so none can rot
+    // between runs. docs/development.md says what each needs.
+    const azure_step = b.step(
         "test-integration-azure",
-        "Run the integration suites against Azure; each skips without its variables (none yet)",
+        "Run the suites against Azure: AZURE_TEST_SUBSCRIPTION and AZURE_TEST_TOKEN; each skips without its variables",
     );
+    // Resource groups made, read, listed by tag and deleted, and the sweep
+    // of what crashed runs left.
+    const resources_azure_tests = b.addTest(.{
+        .name = "resources-azure-integration",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/resources_azure_integration.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "resources", .module = resources },
+                .{ .name = "core", .module = core },
+            },
+        }),
+        .filters = test_filters,
+        .test_runner = test_runner,
+    });
+    azure_step.dependOn(&streamed(b, resources_azure_tests).step);
+    test_step.dependOn(&resources_azure_tests.step);
 
     // Examples, one `example-<name>` step per examples/<name>.zig, join with
     // the first module that has one; `zig build test` compiles them all.
@@ -122,9 +149,9 @@ pub fn build(b: *std.Build) void {
     // that is almost certainly wrong, such as a pointer to stack memory that
     // leaves its function. A program on the PATH, not a package. Quiet on a
     // clean tree, and run every time: a command whose output is not captured
-    // has side effects, so the build never caches it. tests/ and examples/
-    // join the list when they exist.
-    const lint = b.addSystemCommand(&.{ "zigvet", "build.zig", "src", "tools" });
+    // has side effects, so the build never caches it. examples/ joins the
+    // list when it exists.
+    const lint = b.addSystemCommand(&.{ "zigvet", "build.zig", "src", "tests", "tools" });
     lint.setCwd(b.path("."));
     b.step("lint", "Report code that compiles but is wrong (zigvet, from the PATH; test runs it too)").dependOn(&lint.step);
     test_step.dependOn(&lint.step);
@@ -144,9 +171,22 @@ pub fn build(b: *std.Build) void {
     b.step("complexity", "Fail a function newly over its complexity limit, or worse than complexity.baseline (gnarl, from the PATH; test runs it too)").dependOn(&complexity.step);
     test_step.dependOn(&complexity.step);
 
-    const fmt_paths = b.pathList(&.{ "build.zig", "build.zig.zon", "complexity.zon", "src", "tools" });
+    const fmt_paths = b.pathList(&.{ "build.zig", "build.zig.zon", "complexity.zon", "src", "tests", "tools" });
     test_step.dependOn(&b.addFmt(.{ .paths = fmt_paths, .check = true }).step);
     b.step("fmt", "Format the Zig in build.zig, complexity.zon, src/ and tools/").dependOn(&b.addFmt(.{ .paths = fmt_paths }).step);
+}
+
+/// Runs a suite as a plain program instead of through the build runner's
+/// test protocol, which prints nothing until the suite ends: run this way,
+/// the test runner prints each test's name as it starts, so a suite that
+/// hangs leaves a log saying which test it was. Its output goes straight
+/// through, and such a step always runs, since its result depends on a
+/// server, never the cache. (gcp.zig's, at eae944c.)
+fn streamed(b: *std.Build, tests: *std.Build.Step.Compile) *std.Build.Step.Run {
+    const run = std.Build.Step.Run.create(b, b.fmt("run {s}", .{tests.name}));
+    run.addArtifactArg2(tests, .{});
+    run.stdio = .inherit;
+    return run;
 }
 
 /// A module's name, as `-Dmodule` takes it, and the module.

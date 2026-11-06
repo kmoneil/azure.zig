@@ -20,7 +20,7 @@ fake for testing code that uses it.
 | `storage` | Blob Storage: blobs read and written under ETag conditions, Shared Key and SAS signing, large streamed transfers, leases and append blobs; tested against Azurite and Azure | planned |
 | `compute` | Virtual machines, their sizes, zones and operations, and spot VMs created and deleted | planned |
 | `imds` | The Instance Metadata Service, on the VM itself: what the VM is, and Scheduled Events, the notice before a spot eviction | planned |
-| `resources` | Subscriptions and resource groups | planned |
+| [`resources`](docs/resources/README.md) | Subscriptions; resource groups made, read, listed by tag and deleted; providers' registration; an in-memory Resource Manager for your own tests | in progress |
 | `prices` | The Retail Prices API: VM prices by region and size, spot or on demand | planned |
 | `network` | A virtual network and subnet for spot workers | planned |
 

@@ -67,10 +67,31 @@ and nightly fuzzing with the first module that has fuzz properties.
 
 ## Integration tests
 
-Each suite skips cleanly when what it needs is not configured. None exist
-yet: Blob Storage's suite against Azurite, the local emulator, comes with
-`storage`, and the suites against Azure itself, which need a subscription
-and a service principal, with the modules that call it.
+Each suite skips cleanly when what it needs is not configured. Blob
+Storage's suite against Azurite, the local emulator, comes with `storage`.
+
+### Against Azure
+
+The suites against Azure itself run with `zig build test-integration-azure`
+and need a subscription and a token for Resource Manager. With the test
+principal's key file (`~/.azure-keys/azzig-test.json`, as `az ad sp
+create-for-rbac` writes it), `tools/azure-token.sh` mints one, passing the
+secret to curl on stdin rather than on a command line:
+
+```sh
+AZURE_TEST_SUBSCRIPTION=<guid> AZURE_TEST_TOKEN=$(tools/azure-token.sh) \
+    zig build test-integration-azure
+```
+
+A token lasts about an hour. Everything a run makes is a resource group
+named `azzig-<suite>-<run>`, tagged `azzig-run` and `azzig-created` (Unix
+seconds), and deleted as the run ends. A crashed run's groups are deleted
+by the next run of any suite once they are a day old: the sweep, in
+`tests/sweep.zig`.
+
+| Suite | What it does | Costs |
+| --- | --- | --- |
+| resources | Sweeps; lists subscriptions and the providers azure.zig uses (each must be registered); makes `azzig-resources-<run>` in `AZURE_TEST_LOCATION` (eastus2 when unset), makes it again, reads it, finds it by its tag, deletes it and waits | nothing; a minute or two |
 
 ## rest-core
 

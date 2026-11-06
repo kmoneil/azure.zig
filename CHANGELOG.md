@@ -28,3 +28,9 @@ Until 1.0, minor versions may break the API; each entry says how.
   answer, with the error its body carried.
 - `core.testing`: rest-core's fakes, ARM's error bodies and refusals, and a
   long-running operation scripted as ARM answers one.
+- `resources`: subscriptions listed; resource groups made (201, or 200 with
+  the spec's tags), read, listed by tag through ARM's OData filter, and
+  deleted as a long-running operation, with `force_vms`; providers read
+  and registered on request, never on their own. Names are checked before
+  sending. `resources.testing.FakeResources` is Resource Manager in memory
+  for these calls. Not yet run against Azure.
