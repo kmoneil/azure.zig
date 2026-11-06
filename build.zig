@@ -168,6 +168,25 @@ pub fn build(b: *std.Build) void {
     // Examples, one `example-<name>` step per examples/<name>.zig, join with
     // the first module that has one; `zig build test` compiles them all.
 
+    // How fast this build computes a CRC-64/NVME, always in ReleaseFast: the
+    // numbers are about the code the CPU runs, not a debug build's.
+    const bench_crc64 = b.addExecutable(.{
+        .name = "bench-crc64",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tools/bench_crc64.zig"),
+            .target = target,
+            .optimize = .fast,
+            .imports = &.{.{ .name = "core", .module = b.createModule(.{
+                .root_source_file = b.path("src/core/root.zig"),
+                .target = target,
+                .optimize = .fast,
+                .imports = &.{.{ .name = "rest_core", .module = b.dependency("rest_core", .{ .target = target, .optimize = .fast }).module("rest_core") }},
+            }) }},
+        }),
+    });
+    b.step("bench-crc64", "Measure CRC-64/NVME throughput, in ReleaseFast").dependOn(&b.addRunArtifact(bench_crc64).step);
+    test_step.dependOn(&bench_crc64.step);
+
     // zigvet (github.com/kmoneil/zigvet) reports code the compiler accepts
     // that is almost certainly wrong, such as a pointer to stack memory that
     // leaves its function. A program on the PATH, not a package. Quiet on a

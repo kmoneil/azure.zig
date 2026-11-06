@@ -18,6 +18,7 @@ zig build test-unit                    # the unit tests alone, compiling nothing
 zig build test-integration             # against Azurite (no suites yet)
 zig build test-integration-azure       # against Azure (no suites yet)
 zig build coverage                     # line coverage; needs kcov
+zig build bench-crc64                  # how fast this machine computes CRC-64/NVME
 zig build fmt                          # format the Zig
 zig build lint                         # zigvet: code that compiles but is wrong
 zig build complexity                   # gnarl --check: complexity against complexity.baseline

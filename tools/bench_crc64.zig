@@ -1,0 +1,68 @@
+//! How fast this build computes a CRC-64/NVME: std's one table built from
+//! its parameters, the eight tables `core.crc64` falls back to, and
+//! `core.crc64.hash`, which folds with the CPU's carry-less multiply where
+//! the target has it. 256 MiB of random bytes, best of five, always in
+//! ReleaseFast. (gcp.zig's tools/bench_crc32c.zig, for this CRC.)
+//!
+//!     zig build bench-crc64
+//!     zig build bench-crc64 -Dcpu=baseline
+
+const std = @import("std");
+const builtin = @import("builtin");
+const core = @import("core");
+
+const size = 256 * 1024 * 1024;
+
+const StdNvme = std.hash.crc.Generic(u64, .{
+    .polynomial = @bitReverse(core.crc64.polynomial),
+    .initial = ~@as(u64, 0),
+    .reflect_input = true,
+    .reflect_output = true,
+    .xor_output = ~@as(u64, 0),
+});
+
+pub fn main(init: std.process.Init) !void {
+    const io = init.io;
+    const data = try init.gpa.alloc(u8, size);
+    defer init.gpa.free(data);
+    io.random(data);
+
+    const Candidate = struct { name: []const u8, run: *const fn ([]const u8) u64 };
+    const Stream = struct {
+        /// `core.crc64.Hasher` fed 64 KiB at a time, as a download feeds it.
+        fn run(bytes: []const u8) u64 {
+            var hasher: core.crc64.Hasher = .init();
+            var rest = bytes;
+            while (rest.len > 0) {
+                const n = @min(rest.len, 64 * 1024);
+                hasher.update(rest[0..n]);
+                rest = rest[n..];
+            }
+            return hasher.final();
+        }
+    };
+    const candidates = [_]Candidate{
+        .{ .name = "std Generic, NVME", .run = StdNvme.hash },
+        .{ .name = "core.crc64.hashSoftware", .run = core.crc64.hashSoftware },
+        .{ .name = "core.crc64.hash", .run = core.crc64.hash },
+        .{ .name = "Hasher, 64 KiB updates", .run = Stream.run },
+    };
+    std.debug.print("{t} ({s}), core.crc64.implementation = .{t}\n", .{ builtin.target.cpu.arch, builtin.target.cpu.model.name, core.crc64.implementation });
+    var want: ?u64 = null;
+    for (candidates) |candidate| {
+        var best: u64 = std.math.maxInt(u64);
+        for (0..5) |_| {
+            // Keep the optimizer from hashing once for all five runs.
+            std.mem.doNotOptimizeAway(data.ptr);
+            const started = std.Io.Clock.awake.now(io);
+            const crc = candidate.run(data);
+            std.mem.doNotOptimizeAway(crc);
+            best = @min(best, @as(u64, @intCast(started.durationTo(std.Io.Clock.awake.now(io)).toNanoseconds())));
+            if (want) |w| {
+                if (crc != w) return error.CandidatesDisagree;
+            } else want = crc;
+        }
+        const mib_per_s = @as(f64, @floatFromInt(size)) / (1024.0 * 1024.0) / (@as(f64, @floatFromInt(best)) / 1e9);
+        std.debug.print("  {s:<26} {d:>8.0} MiB/s\n", .{ candidate.name, mib_per_s });
+    }
+}

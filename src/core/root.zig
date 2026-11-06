@@ -41,12 +41,16 @@ pub const operation = @import("operation.zig");
 /// compare: the default port written out or not, the host in any case.
 pub const origin = @import("origin.zig");
 
+/// CRC-64/NVME, Blob Storage's `x-ms-content-crc64`.
+pub const crc64 = @import("crc64.zig");
+
 test {
     @import("std").testing.refAllDecls(@This());
     _ = @import("Cloud.zig");
     _ = @import("arm.zig");
     _ = @import("operation.zig");
     _ = @import("origin.zig");
+    _ = @import("crc64.zig");
     _ = @import("testing.zig");
     _ = @import("rest_core_test.zig");
 }

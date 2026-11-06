@@ -15,6 +15,7 @@
     // globs overlap: each file joins this list in the change that adds it.
     .hot = .{
         "src/core/arm.zig",
+        "src/core/crc64.zig",
     },
     // What only builds, tests or shows: the build, the tools
     // (tools/test_runner.zig is std's runner, carried unchanged), the suites

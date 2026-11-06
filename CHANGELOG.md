@@ -36,6 +36,12 @@ Until 1.0, minor versions may break the API; each entry says how.
   names the client's origin as origins compare, the default port written
   out or not and the host in any case; ARM's next pages and operation URLs
   use it.
+- `core.crc64`: CRC-64/NVME, Blob Storage's `x-ms-content-crc64`: a
+  carry-less fold of four lanes where the CPU multiplies without carries
+  (PCLMULQDQ with AVX, PMULL), eight tables elsewhere; `Hasher`, `combine`
+  for parts hashed apart, and the header's base64 both ways, refusing any
+  but the canonical twelve characters. 13 GiB/s on an Apple M5 in
+  ReleaseFast (std's one table, 533 MiB/s); `zig build bench-crc64`.
 - `resources`: subscriptions listed; resource groups made (201, or 200 with
   the spec's tags), read, listed by tag through ARM's OData filter, and
   deleted as a long-running operation, with `force_vms`; providers read
