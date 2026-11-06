@@ -56,6 +56,15 @@ between runs.
 in `kcov-merged/`. kcov counts lines, not branches, and sees only code the
 compiler kept.
 
+## Continuous integration
+
+CI runs `zig build test` on Linux, macOS and Windows, with the zigvet and
+gnarl releases `.github/actions/vet-tools` pins (gnarl's is
+`complexity.zon`'s `.gnarl`), each checked against its binary's digest;
+the unit tests in ReleaseSafe and ReleaseFast on Linux; and coverage, its
+report attached to each run. The Azurite job joins with storage's suite,
+and nightly fuzzing with the first module that has fuzz properties.
+
 ## Integration tests
 
 Each suite skips cleanly when what it needs is not configured. None exist
