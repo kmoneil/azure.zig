@@ -5,7 +5,13 @@
     // change it; a fork generates its own.
     .fingerprint = 0x1419cd004ea55582,
     .minimum_zig_version = "0.17.1",
-    // std only.
-    .dependencies = .{},
+    // rest-core, the cloud-neutral half of a REST client, pinned by hash:
+    // zig fetch --save=rest_core "git+https://github.com/kmoneil/rest-core.zig#<tag>"
+    .dependencies = .{
+        .rest_core = .{
+            .url = "git+https://github.com/kmoneil/rest-core.zig?ref=v0.1.0#f2508622699df39a556d45fe9a4cf0703c0fc632",
+            .hash = "rest_core-0.1.0-rTJs5L0PCADPx4qqtzSTUfETOcJxb2rm0r6k8lzoC7r8",
+        },
+    },
     .paths = .{ "build.zig", "build.zig.zon", "src", "LICENSE", "README.md", "CHANGELOG.md" },
 }

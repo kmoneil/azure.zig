@@ -63,6 +63,25 @@ yet: Blob Storage's suite against Azurite, the local emulator, comes with
 `storage`, and the suites against Azure itself, which need a subscription
 and a service principal, with the modules that call it.
 
+## rest-core
+
+`core` builds on [rest-core](https://github.com/kmoneil/rest-core.zig),
+pinned in `build.zig.zon` by its content hash. To move to another
+release, fetch its tag and check what Zig resolved:
+
+```sh
+zig fetch --save=rest_core "git+https://github.com/kmoneil/rest-core.zig#v0.1.0"
+git ls-remote https://github.com/kmoneil/rest-core.zig 'refs/tags/v0.1.0^{}'
+```
+
+The fetch must say `resolved ref "v0.1.0"`, and the commit it names must
+be the one `ls-remote` prints. The tag goes after `#`: given as `?ref=`,
+`zig fetch` takes the default branch instead and saves a URL that looks
+right. Zig unpacks fetched packages into `zig-pkg/`, which git ignores.
+
+What rest-core lacks for Azure goes on its board, or its issues once it
+takes them.
+
 ## Where the code came from
 
 Some of this library is carried from

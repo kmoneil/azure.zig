@@ -13,7 +13,9 @@
     // codecs, Blob's streamed transfers and signing, and the like. Named one
     // by one, never as a glob over src, since hot wins over cold where
     // globs overlap: each file joins this list in the change that adds it.
-    .hot = .{},
+    .hot = .{
+        "src/core/arm.zig",
+    },
     // What only builds, tests or shows: the build, the tools
     // (tools/test_runner.zig is std's runner, carried unchanged), the suites
     // under tests/, the examples, and inside src the in-memory fakes and

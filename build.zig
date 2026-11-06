@@ -9,11 +9,17 @@ pub fn build(b: *std.Build) void {
         "Skip tests whose names do not match any filter",
     ) orelse &.{};
 
-    // What the service modules share. It imports nothing but std.
+    // rest-core (github.com/kmoneil/rest-core.zig): the transport, the
+    // request loop and the rest of a REST client that no cloud owns.
+    const rest_core = b.dependency("rest_core", .{ .target = target, .optimize = optimize }).module("rest_core");
+
+    // What the service modules share: rest-core, and Azure's side of its
+    // request loop.
     const core = b.addModule("core", .{
         .root_source_file = b.path("src/core/root.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{.{ .name = "rest_core", .module = rest_core }},
     });
 
     // The service modules join here as each lands: auth, storage, compute,

@@ -1,9 +1,11 @@
 # azure.zig
 
 **Azure clients for Zig 0.17.1, written against the REST APIs.**
-One package, `azure`, with a module per service over a shared core, and no
-dependencies beyond the Zig standard library: an application compiles only
-the modules it imports.
+One package, `azure`, with a module per service over a shared core: an
+application compiles only the modules it imports. Its one dependency is
+[rest-core](https://github.com/kmoneil/rest-core.zig), the cloud-neutral
+half of a REST client, which itself needs nothing beyond the Zig standard
+library.
 
 **Status: pre-release, nothing usable yet.** The modules below are planned,
 and land one at a time, each with its tests, its docs, and an in-memory
@@ -13,7 +15,7 @@ fake for testing code that uses it.
 
 | Module | Covers | Status |
 | --- | --- | --- |
-| `core` | What every module shares: an HTTP transport with a per-request time limit, retries with jittered backoff that honour the delay Azure asks for, ARM's error bodies, pages and long-running operations, and the seam through which credentials reach each service | planned |
+| `core` | What every module shares: rest-core's HTTP transport with a per-request time limit, retries with jittered backoff that honour the delay Azure asks for, and the seam through which credentials reach each service; and Azure's own side of it, ARM's error bodies, retried set, pages and long-running operations | planned |
 | `auth` | Microsoft Entra ID credentials: a client secret, the Azure CLI's login, managed identity on a VM or App Service, a certificate, workload identity, and a default chain that finds whichever is there | planned |
 | `storage` | Blob Storage: blobs read and written under ETag conditions, Shared Key and SAS signing, large streamed transfers, leases and append blobs; tested against Azurite and Azure | planned |
 | `compute` | Virtual machines, their sizes, zones and operations, and spot VMs created and deleted | planned |
