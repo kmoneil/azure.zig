@@ -1,13 +1,14 @@
-//! The rest-core trial: what azure.zig asks of its core, run through
-//! rest-core v0.1.0. Each test is one thing the trial set out to try: ARM's
-//! refusals, Azure's retried set and the delays it asks for, credentials
-//! through the token seam (a client secret, a certificate's assertion,
-//! managed identity), long-running operations and pages followed on ARM's
-//! origin, and what Storage's Shared Key needs of the loop.
+//! What azure.zig relies on rest-core for, held as tests: ARM's refusals
+//! through the hook, Azure's retried set and the delays it asks for,
+//! credentials through the token seam (a client secret, a certificate's
+//! assertion, managed identity), long-running operations and pages followed
+//! on ARM's origin, and Storage's Shared Key in a call's headers. A rest-core
+//! release that breaks one fails here, before any module notices.
 //!
-//! The credentials here are sketches, as small as shows that the seam holds
-//! each: no refresh ahead of expiry, no retries of their own, no chain.
-//! auth's own come with auth.
+//! They began as the trial that chose rest-core over a copy of gcp.zig's
+//! core. The credentials here are sketches, as small as shows that the seam
+//! holds each: no refresh ahead of expiry, no retries of their own, no
+//! chain. auth's own come with auth.
 
 const std = @import("std");
 const testing = std.testing;
@@ -21,7 +22,7 @@ const Diagnostics = rest_core.Diagnostics;
 const FakeTransport = rest_core.testing.FakeTransport;
 const arm = @import("arm.zig");
 
-const Engine = arm.Engine(.azure_core_trial);
+const Engine = arm.Engine(.azure_core_test);
 
 const arm_url = "https://management.azure.com";
 const arm_scope = "https://management.azure.com/.default";
@@ -61,7 +62,7 @@ fn get(engine: Engine, response: *std.heap.ArenaAllocator, path: []const u8) Eng
     return engine.execute(response, .{ .method = .GET, .path = path });
 }
 
-test "trial: ARM's refusal reads into Diagnostics, with the provider's request id" {
+test "rest-core: ARM's refusal reads into Diagnostics, with the provider's request id" {
     const script = [_]FakeTransport.Reply{.{ .respond = .{
         .status = 404,
         .headers = &.{
@@ -85,7 +86,7 @@ test "trial: ARM's refusal reads into Diagnostics, with the provider's request i
     // first, has nowhere to go: Diagnostics keeps one id.
 }
 
-test "trial: a provider the subscription has not registered is an error of its own" {
+test "rest-core: a provider the subscription has not registered is an error of its own" {
     const script = [_]FakeTransport.Reply{
         .{ .respond = .{ .status = 409, .body = "{\"error\":{\"code\":\"MissingSubscriptionRegistration\",\"message\":\"The subscription is not registered to use namespace 'Microsoft.Compute'.\"}}" } },
         .{ .respond = .{ .status = 409, .body = "{\"error\":{\"code\":\"Subscription Not Registered\",\"message\":\"Please register.\"}}" } },
@@ -103,7 +104,7 @@ test "trial: a provider the subscription has not registered is an error of its o
     try testing.expectEqual(3, rig.fake.requests.items.len);
 }
 
-test "trial: a body that is not ARM's still gives the status and the request id" {
+test "rest-core: a body that is not ARM's still gives the status and the request id" {
     const script = [_]FakeTransport.Reply{.{ .respond = .{
         .status = 502,
         .headers = &.{.{ .name = "x-ms-request-id", .value = "r-502" }},
@@ -122,7 +123,7 @@ test "trial: a body that is not ARM's still gives the status and the request id"
     try testing.expectEqualStrings("r-502", rig.diag.requestId());
 }
 
-test "trial: Azure's retried set is the hook's: 408, 429, 500, 502, 503, 504 and transport failures" {
+test "rest-core: Azure's retried set is the hook's: 408, 429, 500, 502, 503, 504 and transport failures" {
     for ([_]u16{ 408, 429, 500, 502, 503, 504 }) |status| {
         const script = [_]FakeTransport.Reply{
             .{ .respond = .{ .status = status } },
@@ -156,7 +157,7 @@ test "trial: Azure's retried set is the hook's: 408, 429, 500, 502, 503, 504 and
     try testing.expectEqual(2, rig.fake.requests.items.len);
 }
 
-test "trial: a 429 waits what Retry-After or x-ms-retry-after-ms asks" {
+test "rest-core: a 429 waits what Retry-After or x-ms-retry-after-ms asks" {
     const script = [_]FakeTransport.Reply{
         .{ .respond = .{ .status = 429, .headers = &.{.{ .name = "Retry-After", .value = "2" }}, .body = "{\"error\":{\"code\":\"TooManyRequests\",\"message\":\"slow down\"}}" } },
         .{ .respond = .{ .status = 429, .headers = &.{.{ .name = "x-ms-retry-after-ms", .value = "1500" }} } },
@@ -173,7 +174,7 @@ test "trial: a 429 waits what Retry-After or x-ms-retry-after-ms asks" {
     try testing.expectEqual(1_500, rig.clock.sleepMs(1));
 }
 
-test "trial: a delay longer than the policy waits comes back at once, the delay in Diagnostics" {
+test "rest-core: a delay longer than the policy waits comes back at once, the delay in Diagnostics" {
     // ARM's 429s can ask for more than azcore's 60 s cap, so azure.zig picks
     // its own `max_backoff_ms`; past it the caller schedules the next try.
     const script = [_]FakeTransport.Reply{.{ .respond = .{
@@ -194,7 +195,7 @@ test "trial: a delay longer than the policy waits comes back at once, the delay 
     try testing.expectEqual(120_000, rig.diag.retry_after_ms.?);
 }
 
-test "trial: one x-ms-client-request-id on every attempt of a call" {
+test "rest-core: one x-ms-client-request-id on every attempt of a call" {
     const script = [_]FakeTransport.Reply{
         .{ .respond = .{ .status = 503 } },
         .{ .respond = .{} },
@@ -220,7 +221,7 @@ test "trial: one x-ms-client-request-id on every attempt of a call" {
     }
 }
 
-test "trial: a 401 gets one more try, with a fresh token" {
+test "rest-core: a 401 gets one more try, with a fresh token" {
     const script = [_]FakeTransport.Reply{
         .{ .respond = .{ .status = 401, .body = "{\"error\":{\"code\":\"ExpiredAuthenticationToken\",\"message\":\"The access token expiry UTC time is earlier than current UTC time.\"}}" } },
         .{ .respond = .{} },
@@ -236,7 +237,7 @@ test "trial: a 401 gets one more try, with a fresh token" {
     try testing.expectEqualStrings("eyJ0.fresh-token", (try rig.fake.request(1)).bearer.?);
 }
 
-test "trial: a list's next pages are followed on ARM's origin, and only there" {
+test "rest-core: a list's next pages are followed on ARM's origin, and only there" {
     try testing.expectEqualStrings(
         "/subscriptions?api-version=2022-12-01&%24skiptoken=abc",
         (try arm.nextPagePath(arm_url, "https://management.azure.com/subscriptions?api-version=2022-12-01&%24skiptoken=abc")).?,
@@ -291,7 +292,7 @@ fn pollDelayMs(io: std.Io, headers: []const Header) u32 {
     return rest_core.retry_after.serverDelayMs(Header, headers, std.Io.Clock.real.now(io)) orelse 30_000;
 }
 
-test "trial: a long-running PUT is polled at its Azure-AsyncOperation URL, waiting what each answer asks" {
+test "rest-core: a long-running PUT is polled at its Azure-AsyncOperation URL, waiting what each answer asks" {
     const op_url = "https://management.azure.com/subscriptions/sub-1/providers/Microsoft.Compute/locations/eastus/operations/op-1?api-version=2024-07-01";
     const script = [_]FakeTransport.Reply{
         .{ .respond = .{
@@ -353,7 +354,7 @@ test "trial: a long-running PUT is polled at its Azure-AsyncOperation URL, waiti
     try testing.expectEqualStrings("application/json", (try rig.fake.streamRequest(0)).content_type.?);
 }
 
-test "trial: a Location poll is told apart by its status, which only executeStream returns" {
+test "rest-core: a Location poll is told apart by its status, which only executeStream returns" {
     const location = "https://management.azure.com/subscriptions/sub-1/operationresults/op-2?api-version=2021-04-01";
     const script = [_]FakeTransport.Reply{
         .{ .respond = .{ .status = 202, .headers = &.{ .{ .name = "Location", .value = location }, .{ .name = "Retry-After", .value = "1" } }, .body = "" } },
@@ -483,7 +484,7 @@ fn stringField(object: ?std.json.ObjectMap, name: []const u8) ?[]const u8 {
 
 const token_url = "https://login.microsoftonline.com/tenant-1/oauth2/v2.0/token";
 
-test "trial: a client secret's token, fetched through the transport and sent by the loop" {
+test "rest-core: a client secret's token, fetched through the transport and sent by the loop" {
     const script = [_]FakeTransport.Reply{
         .{ .respond = .{ .body = "{\"token_type\":\"Bearer\",\"expires_in\":3599,\"ext_expires_in\":3599,\"access_token\":\"eyJ0.from-entra\"}" } },
         .{ .respond = .{ .status = 401, .body = "{\"error\":{\"code\":\"InvalidAuthenticationToken\",\"message\":\"The access token is invalid.\"}}" } },
@@ -519,7 +520,7 @@ test "trial: a client secret's token, fetched through the transport and sent by 
     try testing.expectEqual(4, rig.fake.requests.items.len);
 }
 
-test "trial: Entra's refusal is the call's error, explained in Diagnostics by the provider" {
+test "rest-core: Entra's refusal is the call's error, explained in Diagnostics by the provider" {
     const script = [_]FakeTransport.Reply{.{ .respond = .{
         .status = 401,
         .body = "{\"error\":\"invalid_client\",\"error_description\":\"AADSTS7000215: Invalid client secret provided.\",\"error_codes\":[7000215],\"trace_id\":\"t-1\",\"correlation_id\":\"c-1\"}",
@@ -599,7 +600,7 @@ fn base64UrlDecode(arena: Allocator, text: []const u8) ![]u8 {
     return out;
 }
 
-test "trial: a certificate's client assertion, signed PS256 with rest-core's rsa" {
+test "rest-core: a certificate's client assertion, signed PS256 with rest-core's rsa" {
     var clock: rest_core.testing.FakeClock = .{ .now_ns = 1_762_466_400 * std.time.ns_per_s };
     const io = clock.io();
     var arena: std.heap.ArenaAllocator = .init(testing.allocator);
@@ -680,7 +681,7 @@ const Imds = struct {
     }
 };
 
-test "trial: managed identity where no IMDS answers is CredentialSourceUnavailable, and nothing goes to ARM" {
+test "rest-core: managed identity where no IMDS answers is CredentialSourceUnavailable, and nothing goes to ARM" {
     const script = [_]FakeTransport.Reply{.{ .fail = error.ConnectionRefused }};
     var rig: Rig = .init(&script);
     defer rig.deinit();
@@ -702,7 +703,7 @@ test "trial: managed identity where no IMDS answers is CredentialSourceUnavailab
     try testing.expectEqualStrings("the token provider failed: CredentialSourceUnavailable", rig.diag.message());
 }
 
-test "trial: managed identity's token, every number in it a string, reaches ARM" {
+test "rest-core: managed identity's token, every number in it a string, reaches ARM" {
     const script = [_]FakeTransport.Reply{
         .{ .respond = .{ .body = "{\"access_token\":\"eyJ0.from-imds\",\"refresh_token\":\"\",\"expires_in\":\"3599\",\"expires_on\":\"1762470000\",\"not_before\":\"1762466400\",\"resource\":\"https://management.azure.com/\",\"token_type\":\"Bearer\"}" } },
         .{ .respond = .{} },
@@ -719,7 +720,7 @@ test "trial: managed identity's token, every number in it a string, reaches ARM"
     try testing.expectEqualStrings("eyJ0.from-imds", (try rig.fake.request(1)).bearer.?);
 }
 
-test "trial: Shared Key signs in the call's headers, once for every attempt" {
+test "rest-core: Shared Key signs in the call's headers, once for every attempt" {
     // Storage's Shared Key signs each request, its method, headers and path
     // and an x-ms-date among them, instead of sending a token. The loop's
     // only place for it is the call's headers: no token provider, and the

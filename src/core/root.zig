@@ -33,5 +33,5 @@ pub const arm = @import("arm.zig");
 test {
     @import("std").testing.refAllDecls(@This());
     _ = @import("arm.zig");
-    _ = @import("trial_test.zig");
+    _ = @import("rest_core_test.zig");
 }

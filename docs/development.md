@@ -79,6 +79,8 @@ be the one `ls-remote` prints. The tag goes after `#`: given as `?ref=`,
 `zig fetch` takes the default branch instead and saves a URL that looks
 right. Zig unpacks fetched packages into `zig-pkg/`, which git ignores.
 
+`src/core/rest_core_test.zig` holds what azure.zig relies on rest-core
+for, so a release that breaks one fails `zig build test` on the bump.
 What rest-core lacks for Azure goes on its board, or its issues once it
 takes them.
 
