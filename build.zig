@@ -23,13 +23,21 @@ pub fn build(b: *std.Build) void {
     });
 
     // The service modules, each at src/<name>/root.zig, as each lands: auth,
-    // storage, compute, imds, prices and network to come. Each imports core
+    // storage, compute, imds and network to come. Each imports core
     // alone, never auth or another service: credentials reach a service
     // through core's TokenProvider seam.
 
     // Resource Manager's basics: subscriptions, resource groups, providers.
     const resources = b.addModule("resources", .{
         .root_source_file = b.path("src/resources/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "core", .module = core }},
+    });
+
+    // VM prices from the Retail Prices API, which needs no credentials.
+    const prices = b.addModule("prices", .{
+        .root_source_file = b.path("src/prices/root.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "core", .module = core }},
@@ -55,10 +63,11 @@ pub fn build(b: *std.Build) void {
     const unit_modules = [_]UnitModule{
         .{ "core", core },
         .{ "resources", resources },
+        .{ "prices", prices },
     };
     // One module's tests alone, for a fuzzing job that gives one module the
     // whole time budget.
-    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core or resources");
+    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core, resources or prices");
     if (only_module) |name| checkModule(&unit_modules, name);
 
     const test_step = b.step("test", "Run unit, property and fuzz-corpus tests, zig fmt --check, zigvet and gnarl");
@@ -121,7 +130,7 @@ pub fn build(b: *std.Build) void {
     // between runs. docs/development.md says what each needs.
     const azure_step = b.step(
         "test-integration-azure",
-        "Run the suites against Azure: AZURE_TEST_SUBSCRIPTION and AZURE_TEST_TOKEN; each skips without its variables",
+        "Run the suites against Azure: AZURE_TEST_SUBSCRIPTION and AZURE_TEST_TOKEN, and PRICES_TEST=1; each skips without its variables",
     );
     // Resource groups made, read, listed by tag and deleted, and the sweep
     // of what crashed runs left.
@@ -141,6 +150,20 @@ pub fn build(b: *std.Build) void {
     });
     azure_step.dependOn(&streamed(b, resources_azure_tests).step);
     test_step.dependOn(&resources_azure_tests.step);
+    // The Retail Prices API, which needs no credentials: PRICES_TEST=1.
+    const prices_azure_tests = b.addTest(.{
+        .name = "prices-azure-integration",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/prices_azure_integration.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "prices", .module = prices }},
+        }),
+        .filters = test_filters,
+        .test_runner = test_runner,
+    });
+    azure_step.dependOn(&streamed(b, prices_azure_tests).step);
+    test_step.dependOn(&prices_azure_tests.step);
 
     // Examples, one `example-<name>` step per examples/<name>.zig, join with
     // the first module that has one; `zig build test` compiles them all.

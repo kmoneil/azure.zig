@@ -21,7 +21,7 @@ fake for testing code that uses it.
 | `compute` | Virtual machines, their sizes, zones and operations, and spot VMs created and deleted | planned |
 | `imds` | The Instance Metadata Service, on the VM itself: what the VM is, and Scheduled Events, the notice before a spot eviction | planned |
 | [`resources`](docs/resources/README.md) | Subscriptions; resource groups made, read, listed by tag and deleted; providers' registration; an in-memory Resource Manager for your own tests | in progress |
-| `prices` | The Retail Prices API: VM prices by region and size, spot or on demand | planned |
+| [`prices`](docs/prices/README.md) | The Retail Prices API: Linux VM prices by region and size, spot or on demand, every amount exact; an in-memory Retail Prices API for your own tests | in progress |
 | `network` | A virtual network and subnet for spot workers | planned |
 
 Service modules import `core` alone, never `auth` or one another:

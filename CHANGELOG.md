@@ -38,3 +38,10 @@ Until 1.0, minor versions may break the API; each entry says how.
   and registered on request, never on their own. Names are checked before
   sending. `resources.testing.FakeResources` is Resource Manager in memory
   for these calls. Not yet run against Azure.
+- `prices`: Linux VM prices from the Retail Prices API, spot or on demand,
+  by region and size, every page read through the API's `:443` links; the
+  Windows, Dev/Test, reservation, Low Priority and Cloud Services rows left
+  out by the filter and again row by row. `Amount` holds a price exactly,
+  from the number's digits. `prices.testing.FakePrices` is the API in
+  memory. Run against the API: 66 regions for Standard_D2as_v5 spot, 1743
+  on-demand sizes in eastus2 over two pages.

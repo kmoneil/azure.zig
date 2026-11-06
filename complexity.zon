@@ -28,6 +28,7 @@
         "src/*/testing.zig",
         "src/*/testing/**",
         "src/*/fake_*.zig",
+        "src/*/production_bodies.zig",
         "src/**/*_test.zig",
     },
 }

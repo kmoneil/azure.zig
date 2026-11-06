@@ -91,6 +91,7 @@ by the next run of any suite once they are a day old: the sweep, in
 
 | Suite | What it does | Costs |
 | --- | --- | --- |
+| prices | `PRICES_TEST=1` and no credentials: Standard_D2as_v5 spot in every region, eastus2's whole on-demand list over its pages, prices in euros, and the API's refusal of `not` | nothing; seconds, five requests |
 | resources | Sweeps; lists subscriptions and the providers azure.zig uses (each must be registered); makes `azzig-resources-<run>` in `AZURE_TEST_LOCATION` (eastus2 when unset), makes it again, reads it, finds it by its tag, deletes it and waits | nothing; a minute or two |
 
 ## rest-core
