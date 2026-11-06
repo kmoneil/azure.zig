@@ -28,6 +28,10 @@ Until 1.0, minor versions may break the API; each entry says how.
   answer, with the error its body carried.
 - `core.testing`: rest-core's fakes, ARM's error bodies and refusals, and a
   long-running operation scripted as ARM answers one.
+- `core.origin.pathOnOrigin`: a link a server gives is followed when it
+  names the client's origin as origins compare, the default port written
+  out or not and the host in any case; ARM's next pages and operation URLs
+  use it.
 - `resources`: subscriptions listed; resource groups made (201, or 200 with
   the spec's tags), read, listed by tag through ARM's OData filter, and
   deleted as a long-running operation, with `force_vms`; providers read

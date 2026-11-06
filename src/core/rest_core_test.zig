@@ -249,12 +249,14 @@ test "rest-core: a list's next pages are followed on ARM's origin, and only ther
         "https://management.azure.com.evil.example/subscriptions",
         "https://management.azure.com@evil.example/subscriptions",
         "http://management.azure.com/subscriptions",
-        // ARM's own, and refused: pathOnOrigin compares bytes, so a link
-        // that writes out the default port, or the host in another case, is
-        // another origin to it. Safe, but a list would stop there.
-        "https://management.azure.com:443/subscriptions",
-        "https://Management.Azure.com/subscriptions",
     }) |link| try testing.expectError(error.InvalidEndpoint, arm.nextPagePath(arm_url, link));
+    // rest-core's own compares bytes, so the default port written out, as
+    // the Retail Prices API writes every next page, or the host in another
+    // case, is another origin to it (rest-core t39); core's compares
+    // origins, and takes both.
+    try testing.expectEqual(null, rest_core.loop.pathOnOrigin(arm_url, "https://management.azure.com:443/subscriptions"));
+    try testing.expectEqualStrings("/subscriptions", (try arm.nextPagePath(arm_url, "https://management.azure.com:443/subscriptions")).?);
+    try testing.expectEqualStrings("/subscriptions", (try arm.nextPagePath(arm_url, "https://Management.Azure.com/subscriptions")).?);
 
     // Through the loop: two pages, the second ending the list.
     const script = [_]FakeTransport.Reply{

@@ -222,7 +222,7 @@ fn readProvisioning(engine: anytype, arena: Allocator, op: *Operation, res: tran
 /// `url` as a path on the engine's origin, copied into `arena`; a URL
 /// elsewhere is refused, so the token never follows it.
 fn originPath(engine: anytype, arena: Allocator, url: []const u8) Error(@TypeOf(engine))![]const u8 {
-    const path = rest_core.loop.pathOnOrigin(engine.base_url, url) orelse {
+    const path = @import("origin.zig").pathOnOrigin(engine.base_url, url) orelse {
         if (engine.diagnostics) |d| d.print("an operation's URL is not on {s}", .{engine.base_url});
         return error.InvalidEndpoint;
     };
