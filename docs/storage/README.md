@@ -96,6 +96,18 @@ A result that holds what the answer said is an `Owned(T)`: one `deinit`
 frees it. `putBlob` gives back a `Written`, its ETag and Last-Modified,
 by value.
 
+## Several tasks
+
+A client takes one call at a time. For calls from several tasks at once,
+give each task a client of its own: `client.sibling(&diag)` makes one on
+the same account, endpoint and credential, reporting into its own
+`Diagnostics`. A sibling has a connection of its own when the transport
+is the built-in one; a custom `Options.transport` is shared, and must take
+calls from several tasks at once, as the token provider is shared. The
+account's namespace is read once for a client and all its siblings, by
+whichever asks first while the rest wait, so a pool of 32 makes one such
+request, not 32. Each is freed with its own `deinit`, in any order.
+
 ## Accounts and credentials
 
 `Endpoint` names the account: `.account` with its name and cloud
