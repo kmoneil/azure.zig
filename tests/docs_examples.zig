@@ -9,6 +9,7 @@ const resources = @import("resources");
 const network = @import("network");
 const prices = @import("prices");
 const storage = @import("storage");
+const auth = @import("auth");
 
 test "docs/resources: a client over FakeResources, and a list by tag" {
     const gpa = std.testing.allocator;
@@ -143,4 +144,34 @@ test "docs/storage: a client over FakeBlob, a compare and swap, a listing after 
     // end snippet
     try std.testing.expectEqual(2, newer.value.blobs.len);
     try std.testing.expectEqualStrings("events/000002", newer.value.blobs[0].name);
+}
+
+test "docs/auth: a ClientSecret over FakeEntra, one credential for two scopes" {
+    const gpa = std.testing.allocator;
+    var clock: auth.testing.FakeClock = .{};
+    const io = clock.io();
+    // snippet: fake-entra
+    var fake: auth.testing.FakeEntra = .init(gpa);
+    defer fake.deinit();
+    try fake.addApp("00000000-0000-4000-8000-00000000aaaa", "00000000-0000-4000-8000-00000000a99a", "the-secret");
+    var cred: auth.ClientSecret = try .init(gpa, io, .{
+        .tenant_id = "00000000-0000-4000-8000-00000000aaaa",
+        .client_id = "00000000-0000-4000-8000-00000000a99a",
+        .secret = "the-secret",
+        .transport = fake.transport(),
+    });
+    defer cred.deinit();
+    // end snippet
+
+    var arena: std.heap.ArenaAllocator = .init(gpa);
+    defer arena.deinit();
+    // snippet: two-scopes
+    // One credential, a token per scope, each cached until five minutes
+    // before it expires.
+    const p = cred.provider();
+    const for_arm = try p.getToken(io, arena.allocator(), &.{"https://management.core.windows.net//.default"});
+    const for_blobs = try p.getToken(io, arena.allocator(), &.{"https://storage.azure.com/.default"});
+    // end snippet
+    try std.testing.expect(!std.mem.eql(u8, for_arm, for_blobs));
+    try std.testing.expectEqual(2, fake.requests);
 }

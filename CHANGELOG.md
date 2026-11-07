@@ -71,6 +71,16 @@ Until 1.0, minor versions may break the API; each entry says how.
   priorities are checked before sending. `network.testing.FakeNetwork`
   refuses what Network refuses, with its codes and statuses. Run against
   Azure on 2026-11-07; the first run corrected two of the fake's answers.
+- `auth`: `ClientSecret`, an app's sign-in at Entra ID's v2 token endpoint
+  with a client secret, and `AzureCli`, the Azure CLI's login (`az account
+  get-access-token`, 10 s, az 2.54.0 or later), each a `TokenProvider`
+  whose tokens are cached per scope: refreshed five minutes before expiry
+  or at Entra's `refresh_in`, one fetch at a time, a failed early refresh
+  keeping the valid token, everything secret wiped when freed. Entra's
+  refusals, with their AADSTS codes and ids, go to `Diagnostics`.
+  `auth.testing.FakeEntra` answers as Entra did when measured; the cache
+  is after gcp.zig's, and its form encoder is gcp.zig's. Run against Entra
+  ID and az 2.92.0 on 2026-11-07.
 - `storage`: Blob Storage at x-ms-version 2026-04-06: containers made,
   read and deleted; block blobs written in one request, read whole or in
   part, read for their properties, listed over every page (a prefix,

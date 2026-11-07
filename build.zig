@@ -22,7 +22,15 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "rest_core", .module = rest_core }},
     });
 
-    // The service modules, each at src/<name>/root.zig, as each lands: auth,
+    // Credentials for every module, through core's TokenProvider seam.
+    const auth = b.addModule("auth", .{
+        .root_source_file = b.path("src/auth/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "core", .module = core }},
+    });
+
+    // The service modules, each at src/<name>/root.zig, as each lands:
     // compute and imds to come. Each imports core alone, never
     // auth or another service: credentials reach a service through core's
     // TokenProvider seam.
@@ -79,6 +87,7 @@ pub fn build(b: *std.Build) void {
     // `zig build test -Dfuzz-runner --fuzz` fuzzes the same tests.
     const unit_modules = [_]UnitModule{
         .{ "core", core },
+        .{ "auth", auth },
         .{ "resources", resources },
         .{ "network", network },
         .{ "prices", prices },
@@ -86,7 +95,7 @@ pub fn build(b: *std.Build) void {
     };
     // One module's tests alone, for a fuzzing job that gives one module the
     // whole time budget.
-    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core, resources, network, prices or storage");
+    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core, auth, resources, network, prices or storage");
     if (only_module) |name| checkModule(&unit_modules, name);
 
     const test_step = b.step("test", "Run unit, property and fuzz-corpus tests, zig fmt --check, zigvet and gnarl");
@@ -216,6 +225,23 @@ pub fn build(b: *std.Build) void {
     });
     azure_step.dependOn(&streamed(b, prices_azure_tests).step);
     test_step.dependOn(&prices_azure_tests.step);
+    // Entra ID itself: the test principal's secret, and the CLI's login.
+    const auth_azure_tests = b.addTest(.{
+        .name = "auth-azure-integration",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/auth_azure_integration.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "auth", .module = auth },
+                .{ .name = "resources", .module = resources },
+            },
+        }),
+        .filters = test_filters,
+        .test_runner = test_runner,
+    });
+    azure_step.dependOn(&streamed(b, auth_azure_tests).step);
+    test_step.dependOn(&auth_azure_tests.step);
     // Blob Storage in the test account, with Shared Key and with a token.
     const storage_azure_tests = b.addTest(.{
         .name = "storage-azure-integration",
@@ -245,6 +271,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "network", .module = network },
                 .{ .name = "prices", .module = prices },
                 .{ .name = "storage", .module = storage },
+                .{ .name = "auth", .module = auth },
             },
         }),
         .filters = test_filters,
@@ -253,12 +280,13 @@ pub fn build(b: *std.Build) void {
     if (only_module == null) unit_step.dependOn(&b.addRunArtifact(docs_tests).step);
 
     // One `example-<name>` step per examples/<name>.zig, each importing the
-    // module it shows; `zig build test` compiles them all, so none rots.
-    const examples = [_]struct { []const u8, []const u8, *std.Build.Module }{
-        .{ "prices_spot", "prices", prices },
-        .{ "resources_subscriptions", "resources", resources },
-        .{ "network_workers", "network", network },
-        .{ "blob_cp", "storage", storage },
+    // modules it shows; `zig build test` compiles them all, so none rots.
+    const examples = [_]struct { []const u8, []const std.Build.Module.Import }{
+        .{ "prices_spot", &.{.{ .name = "prices", .module = prices }} },
+        .{ "resources_subscriptions", &.{.{ .name = "resources", .module = resources }} },
+        .{ "network_workers", &.{.{ .name = "network", .module = network }} },
+        .{ "blob_cp", &.{.{ .name = "storage", .module = storage }} },
+        .{ "auth_subscriptions", &.{ .{ .name = "auth", .module = auth }, .{ .name = "resources", .module = resources } } },
     };
     for (examples) |example| {
         const exe = b.addExecutable(.{
@@ -267,7 +295,7 @@ pub fn build(b: *std.Build) void {
                 .root_source_file = b.path(b.fmt("examples/{s}.zig", .{example[0]})),
                 .target = target,
                 .optimize = optimize,
-                .imports = &.{.{ .name = example[1], .module = example[2] }},
+                .imports = example[1],
             }),
         });
         const run = b.addRunArtifact(exe);

@@ -10,6 +10,12 @@ the guide for the service at hand, each added with its module.
 | [Essentials](essentials.md) | What every module shares: clients, endpoints and clouds, results and memory, errors, retries, logging, and testing |
 | [Development](development.md) | Build steps, testing, coverage, and where carried code came from |
 
+## Credentials
+
+| Guide | What's in it |
+| --- | --- |
+| [Auth](auth/README.md) | A client secret and the Azure CLI's login as token providers, cached per scope, Entra's refusals in Diagnostics, and FakeEntra |
+
 ## Resource Manager
 
 | Guide | What's in it |
