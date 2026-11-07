@@ -15,6 +15,7 @@ the guide for the service at hand, each added with its module.
 | Guide | What's in it |
 | --- | --- |
 | [Resources](resources/README.md) | Subscriptions, resource groups made, read, listed by tag and deleted, providers' registration, and FakeResources |
+| [Network](network/README.md) | Virtual networks and their subnets, private by default, with service endpoints; network security groups and their rules; every write long-running; FakeNetwork |
 
 ## Prices
 

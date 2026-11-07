@@ -23,13 +23,21 @@ pub fn build(b: *std.Build) void {
     });
 
     // The service modules, each at src/<name>/root.zig, as each lands: auth,
-    // storage, compute, imds and network to come. Each imports core
-    // alone, never auth or another service: credentials reach a service
-    // through core's TokenProvider seam.
+    // storage, compute and imds to come. Each imports core alone, never
+    // auth or another service: credentials reach a service through core's
+    // TokenProvider seam.
 
     // Resource Manager's basics: subscriptions, resource groups, providers.
     const resources = b.addModule("resources", .{
         .root_source_file = b.path("src/resources/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "core", .module = core }},
+    });
+
+    // Virtual networks, subnets and network security groups.
+    const network = b.addModule("network", .{
+        .root_source_file = b.path("src/network/root.zig"),
         .target = target,
         .optimize = optimize,
         .imports = &.{.{ .name = "core", .module = core }},
@@ -63,11 +71,12 @@ pub fn build(b: *std.Build) void {
     const unit_modules = [_]UnitModule{
         .{ "core", core },
         .{ "resources", resources },
+        .{ "network", network },
         .{ "prices", prices },
     };
     // One module's tests alone, for a fuzzing job that gives one module the
     // whole time budget.
-    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core, resources or prices");
+    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core, resources, network or prices");
     if (only_module) |name| checkModule(&unit_modules, name);
 
     const test_step = b.step("test", "Run unit, property and fuzz-corpus tests, zig fmt --check, zigvet and gnarl");
@@ -150,6 +159,25 @@ pub fn build(b: *std.Build) void {
     });
     azure_step.dependOn(&streamed(b, resources_azure_tests).step);
     test_step.dependOn(&resources_azure_tests.step);
+    // A security group, a virtual network and its subnets made, read,
+    // refused and deleted, in a group of their own.
+    const network_azure_tests = b.addTest(.{
+        .name = "network-azure-integration",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/network_azure_integration.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "network", .module = network },
+                .{ .name = "resources", .module = resources },
+                .{ .name = "core", .module = core },
+            },
+        }),
+        .filters = test_filters,
+        .test_runner = test_runner,
+    });
+    azure_step.dependOn(&streamed(b, network_azure_tests).step);
+    test_step.dependOn(&network_azure_tests.step);
     // The Retail Prices API, which needs no credentials: PRICES_TEST=1.
     const prices_azure_tests = b.addTest(.{
         .name = "prices-azure-integration",
@@ -176,6 +204,7 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "resources", .module = resources },
+                .{ .name = "network", .module = network },
                 .{ .name = "prices", .module = prices },
             },
         }),
@@ -189,6 +218,7 @@ pub fn build(b: *std.Build) void {
     const examples = [_]struct { []const u8, []const u8, *std.Build.Module }{
         .{ "prices_spot", "prices", prices },
         .{ "resources_subscriptions", "resources", resources },
+        .{ "network_workers", "network", network },
     };
     for (examples) |example| {
         const exe = b.addExecutable(.{

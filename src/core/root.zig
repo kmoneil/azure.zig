@@ -37,6 +37,10 @@ pub const arm = @import("arm.zig");
 /// Long-running ARM operations: begun, polled, waited on, and read.
 pub const operation = @import("operation.zig");
 
+/// ARM's naming rules, checked before a name goes into a path: a
+/// subscription, a resource group, a location, tags.
+pub const names = @import("names.zig");
+
 /// CRC-64/NVME, Blob Storage's `x-ms-content-crc64`.
 pub const crc64 = @import("crc64.zig");
 
@@ -45,6 +49,7 @@ test {
     _ = @import("Cloud.zig");
     _ = @import("arm.zig");
     _ = @import("operation.zig");
+    _ = @import("names.zig");
 
     _ = @import("crc64.zig");
     _ = @import("testing.zig");
