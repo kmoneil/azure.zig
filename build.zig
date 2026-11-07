@@ -73,18 +73,9 @@ pub fn build(b: *std.Build) void {
     // tools/test_runner.zig).
     const test_runner: std.Build.Step.Compile.TestRunner = .{ .path = b.path("tools/test_runner.zig"), .mode = .server };
 
-    // Fuzzing needs the LLVM backend. The self-hosted x86_64 backend, the
-    // Debug default there, emits no coverage instrumentation, so the fuzzer
-    // would run blind.
-    const fuzz_runner = b.option(
-        bool,
-        "fuzz-runner",
-        "Build the unit tests for `zig build test --fuzz`: LLVM backend",
-    ) orelse false;
-
     // Unit, property and fuzz-corpus tests, one run per module. No network: a
-    // fake transport and a fake clock drive everything.
-    // `zig build test -Dfuzz-runner --fuzz` fuzzes the same tests.
+    // fake transport and a fake clock drive everything. `zig build fuzz`
+    // (below) builds the fuzz properties alone, for the fuzzer.
     const unit_modules = [_]UnitModule{
         .{ "core", core },
         .{ "auth", auth },
@@ -110,9 +101,29 @@ pub fn build(b: *std.Build) void {
             .root_module = entry[1],
             .filters = test_filters,
             .test_runner = test_runner,
-            .use_llvm = if (fuzz_runner) true else null,
         });
         unit_step.dependOn(&b.addRunArtifact(unit_tests).step);
+    }
+
+    // The fuzz properties alone, one binary per module: `zig build fuzz`
+    // replays each one's corpus and seeded inputs, and `zig build fuzz
+    // --fuzz` (or `--fuzz=N`) runs them under the coverage-guided fuzzer.
+    // `-Dfuzz-filter` takes only the properties whose names hold it, and
+    // `-Dmodule` one module's. use_llvm: only the LLVM backend emits the
+    // fuzzer's instrumentation; the self-hosted backend, x86_64 Linux's
+    // Debug default, emits none, and the fuzzer would run blind.
+    const fuzz_step = b.step("fuzz", "Replay the fuzz properties' inputs (--fuzz or --fuzz=N to fuzz them; -Dfuzz-filter, -Dmodule)");
+    const fuzz_filter = b.option([]const u8, "fuzz-filter", "zig build fuzz: only the fuzz properties whose names hold this") orelse "fuzz ";
+    for (unit_modules) |entry| {
+        if (only_module) |name| if (!std.mem.eql(u8, entry[0], name)) continue;
+        const fuzz_tests = b.addTest(.{
+            .name = b.fmt("fuzz-{s}", .{entry[0]}),
+            .root_module = entry[1],
+            .filters = &.{fuzz_filter},
+            .test_runner = test_runner,
+            .use_llvm = true,
+        });
+        fuzz_step.dependOn(&b.addRunArtifact(fuzz_tests).step);
     }
 
     // Line coverage of the unit tests, measured by kcov, which must be on
