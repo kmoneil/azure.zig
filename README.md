@@ -26,7 +26,7 @@ fake for testing code that uses it.
 | `imds` | The Instance Metadata Service, on the VM itself: what the VM is, and Scheduled Events, the notice before a spot eviction | planned |
 | [`resources`](docs/resources/README.md) | Subscriptions; resource groups made, read, listed by tag and deleted; providers' registration; an in-memory Resource Manager for your own tests | in progress |
 | [`prices`](docs/prices/README.md) | The Retail Prices API: Linux VM prices by region and size, spot or on demand, every amount exact; an in-memory Retail Prices API for your own tests | in progress |
-| `network` | A virtual network and subnet for spot workers | planned |
+| [`network`](docs/network/README.md) | Virtual networks, their subnets (private by default, with service endpoints) and network security groups, made, read and deleted; an in-memory Microsoft.Network for your own tests | in progress |
 
 Service modules import `core` alone, never `auth` or one another:
 credentials reach a client through core's token-provider seam, so a
