@@ -16,6 +16,9 @@ pub const Diagnostics = rest_core.Diagnostics;
 pub const TokenProvider = rest_core.TokenProvider;
 pub const StaticToken = rest_core.StaticToken;
 pub const RetryPolicy = rest_core.RetryPolicy;
+/// Whether a transport failure is worth another attempt: a reset, a
+/// timeout, a refused connection.
+pub const isRetryable = rest_core.isRetryable;
 pub const retry_after = rest_core.retry_after;
 pub const query = rest_core.query;
 pub const timestamp = rest_core.timestamp;

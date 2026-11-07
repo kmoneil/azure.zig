@@ -11,12 +11,12 @@ Building, testing and measuring coverage. How changes are made is in
 zig build test                         # unit, property and fuzz-corpus tests, zig fmt --check, lint and complexity
 zig build test --seed=0x1234           # the same, with other pseudo-random inputs
 zig build test -Doptimize=ReleaseFast  # the same, optimized; also ReleaseSafe
-zig build test -Dmodule=network        # one module's unit tests: core, resources, network or prices
+zig build test -Dmodule=storage        # one module's unit tests: core, resources, network, prices or storage
 zig build test -Dfuzz-runner --fuzz    # coverage-guided fuzzing, LLVM backend
 zig build test -Dtest-filter=fuzz      # only the tests whose names match
 zig build test-unit                    # the unit tests alone, compiling nothing else
-zig build test-integration             # against Azurite (no suites yet)
-zig build test-integration-azure       # against Azure: prices, resources, network (below)
+zig build test-integration             # against Azurite: storage (below)
+zig build test-integration-azure       # against Azure: prices, resources, network, storage (below)
 zig build coverage                     # line coverage; needs kcov
 zig build bench-crc64                  # how fast this machine computes CRC-64/NVME
 zig build example-prices_spot          # an example, one step per examples/<name>.zig
@@ -72,13 +72,30 @@ CI runs `zig build test` on Linux, macOS and Windows, with the zigvet and
 gnarl releases `.github/actions/vet-tools` pins (gnarl's is
 `complexity.zon`'s `.gnarl`), each checked against its binary's digest;
 the unit tests in ReleaseSafe and ReleaseFast on Linux; and coverage, its
-report attached to each run. The Azurite job joins with storage's suite,
-and nightly fuzzing with the first module that has fuzz properties.
+report attached to each run; and storage's suite against Azurite, the
+`azurite` job, its image pinned by digest. Nightly fuzzing joins with the
+first module that has fuzz properties.
 
 ## Integration tests
 
-Each suite skips cleanly when what it needs is not configured. Blob
-Storage's suite against Azurite, the local emulator, comes with `storage`.
+Each suite skips cleanly when what it needs is not configured.
+
+### Against Azurite
+
+`zig build test-integration` runs storage's suite against Azurite,
+Blob Storage's emulator, which checks every Shared Key signature, when
+`AZURITE_TEST=1`; `AZURITE_BLOB_URL` names another endpoint than
+`http://127.0.0.1:10000`. Azurite runs from npm, in memory:
+
+```sh
+npx azurite@3.37.0 --silent --inMemoryPersistence --blobHost 127.0.0.1 &
+AZURITE_TEST=1 zig build test-integration
+```
+
+It runs `tests/storage_scenario.zig`, as the live suite does (below),
+where Azurite answers otherwise than production: a conditional read of a
+blob not there is 412, not 404, and a range from a blob's end reads no
+bytes rather than 416.
 
 ### Against Azure
 
@@ -104,6 +121,18 @@ by the next run of any suite once they are a day old: the sweep, in
 | prices | `PRICES_TEST=1` and no credentials: Standard_D2as_v5 spot in every region, eastus2's whole on-demand list over its pages, prices in euros, and the API's refusal of `not` | nothing; seconds, five requests |
 | resources | Sweeps; lists subscriptions and the providers azure.zig uses (each must be registered); makes `azzig-resources-<run>` in `AZURE_TEST_LOCATION` (eastus2 when unset), makes it again, reads it, finds it by its tag, deletes it and waits | nothing; a minute or two |
 | network | Sweeps; in `azzig-network-<run>`, a security group, a network with a private subnet behind it (Storage endpoint), the network made again, a subnet on its own; then what Network refuses (overlap, outside the range, a group in use, a reference not there, another location, no network) and what a delete of nothing answers, each printed as a `fact:`; then every delete | nothing; a few minutes |
+| storage | `AZURE_TEST_STORAGE_ACCOUNT`, and `AZURE_TEST_STORAGE_KEY` (Shared Key) or `AZURE_TEST_STORAGE_TOKEN` (a token for `https://storage.azure.com/.default`), each run once: in the kept container `azzig-test`, blobs under the run's prefix written, read whole and in part, held to conditions, listed over pages and deleted, and a container `azzig-test-<run>` made and deleted; blobs there a day old are deleted first | under a cent; seconds |
+
+The storage suite's key is the test account's (kb/azure-resources),
+from ARM's `listKeys`, which the test principal may call; pass it in the
+environment and never print it. Its token is the principal's, which has
+Storage Blob Data Contributor there:
+
+```sh
+AZURE_TEST_STORAGE_ACCOUNT=<account> AZURE_TEST_STORAGE_KEY=<key> \
+AZURE_TEST_STORAGE_TOKEN=$(AZURE_SCOPE=https://storage.azure.com/.default tools/azure-token.sh) \
+    zig build test-integration-azure -Dtest-filter=storage
+```
 
 ## rest-core
 
@@ -137,3 +166,4 @@ in either can be carried to the other.
 | --- | --- | --- |
 | tools/test_runner.zig | tools/test_runner.zig | eae944c |
 | tools/check_docs.py | tools/check_docs.py | eae944c |
+| src/storage/xml.zig | src/storage/xml.zig (changed: a byte order mark skipped, attributes kept) | eae944c |
