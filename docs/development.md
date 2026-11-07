@@ -11,12 +11,12 @@ Building, testing and measuring coverage. How changes are made is in
 zig build test                         # unit, property and fuzz-corpus tests, zig fmt --check, lint and complexity
 zig build test --seed=0x1234           # the same, with other pseudo-random inputs
 zig build test -Doptimize=ReleaseFast  # the same, optimized; also ReleaseSafe
-zig build test -Dmodule=storage        # one module's unit tests: core, resources, network, prices or storage
+zig build test -Dmodule=storage        # one module's unit tests: core, auth, resources, network, prices or storage
 zig build test -Dfuzz-runner --fuzz    # coverage-guided fuzzing, LLVM backend
 zig build test -Dtest-filter=fuzz      # only the tests whose names match
 zig build test-unit                    # the unit tests alone, compiling nothing else
 zig build test-integration             # against Azurite: storage (below)
-zig build test-integration-azure       # against Azure: prices, resources, network, storage (below)
+zig build test-integration-azure       # against Azure: auth, prices, resources, network, storage (below)
 zig build coverage                     # line coverage; needs kcov
 zig build bench-crc64                  # how fast this machine computes CRC-64/NVME
 zig build example-prices_spot          # an example, one step per examples/<name>.zig
@@ -118,6 +118,7 @@ by the next run of any suite once they are a day old: the sweep, in
 
 | Suite | What it does | Costs |
 | --- | --- | --- |
+| auth | `AZURE_TEST_KEY_FILE` (the test principal's key file): tokens for Resource Manager and Storage from one `ClientSecret`, the subscriptions it sees, and a wrong secret's refusal; `AZURE_TEST_CLI=1`: the Azure CLI's login through the real `az`, its subscriptions, and an unknown resource's refusal | nothing; seconds |
 | prices | `PRICES_TEST=1` and no credentials: Standard_D2as_v5 spot in every region, eastus2's whole on-demand list over its pages, prices in euros, and the API's refusal of `not` | nothing; seconds, five requests |
 | resources | Sweeps; lists subscriptions and the providers azure.zig uses (each must be registered); makes `azzig-resources-<run>` in `AZURE_TEST_LOCATION` (eastus2 when unset), makes it again, reads it, finds it by its tag, deletes it and waits | nothing; a minute or two |
 | network | Sweeps; in `azzig-network-<run>`, a security group, a network with a private subnet behind it (Storage endpoint), the network made again, a subnet on its own; then what Network refuses (overlap, outside the range, a group in use, a reference not there, another location, no network) and what a delete of nothing answers, each printed as a `fact:`; then every delete | nothing; a few minutes |
@@ -167,3 +168,5 @@ in either can be carried to the other.
 | tools/test_runner.zig | tools/test_runner.zig | eae944c |
 | tools/check_docs.py | tools/check_docs.py | eae944c |
 | src/storage/xml.zig | src/storage/xml.zig (changed: a byte order mark skipped, attributes kept) | eae944c |
+| src/auth/form.zig | src/auth/form.zig | 323aa61 |
+| src/auth/Cache.zig | src/auth/Cache.zig (after it: a token per scope, azcore's refresh times) | 323aa61 |
