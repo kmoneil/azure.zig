@@ -36,6 +36,20 @@ pub const engine_headers = [_]transport.Header{
     .{ .name = "x-ms-return-client-request-id", .value = "true" },
 };
 
+/// A name and value ARM keeps on a resource. Tag names match without
+/// regard to case, as ARM's do.
+pub const Tag = struct {
+    name: []const u8,
+    value: []const u8,
+};
+
+/// The value of the tag named `name` among `tags`, matched without regard
+/// to case; null when there is none.
+pub fn findTag(tags: []const Tag, name: []const u8) ?[]const u8 {
+    for (tags) |t| if (std.ascii.eqlIgnoreCase(t.name, name)) return t.value;
+    return null;
+}
+
 /// A fresh `x-ms-client-request-id`, a random (version 4) UUID: one per
 /// call, the same on each of its attempts, so a call can be matched to
 /// ARM's records of it.

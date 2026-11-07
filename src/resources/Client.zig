@@ -384,19 +384,12 @@ fn writeGroupBody(jw: *std.json.Stringify, spec: types.GroupSpec) std.json.Strin
 }
 
 fn checkGroup(self: *Client, subscription: []const u8, name: []const u8) Error!void {
-    if (!validate.isSubscription(subscription)) return self.refuse("a subscription id is a GUID", .{});
-    if (!validate.isGroupName(name)) return self.refuse("a resource group's name is 1 to 90 of letters, digits and -_.(), not ending in '.'", .{});
+    if (core.names.groupProblem(subscription, name)) |why| return self.refuse("{s}", .{why});
 }
 
 fn checkSpec(self: *Client, spec: types.GroupSpec) Error!void {
     if (!validate.isLocation(spec.location)) return self.refuse("a location is letters and digits, as eastus2", .{});
-    for (spec.tags, 0..) |t, i| {
-        if (!validate.isTagName(t.name)) return self.refuse("a tag name is 1 to 512 bytes, none of <>%&\\?/", .{});
-        if (!validate.isTagValue(t.value)) return self.refuse("a tag value is up to 256 bytes, no control bytes", .{});
-        for (spec.tags[0..i]) |earlier| {
-            if (std.ascii.eqlIgnoreCase(earlier.name, t.name)) return self.refuse("two tags named alike: ARM's tag names ignore case", .{});
-        }
-    }
+    if (core.names.tagsProblem(spec.tags)) |why| return self.refuse("{s}", .{why});
 }
 
 fn refuse(self: *Client, comptime fmt: []const u8, args: anytype) error{InvalidArgument} {

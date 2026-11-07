@@ -35,11 +35,9 @@ pub const Subscription = struct {
     };
 };
 
-/// A name and value ARM keeps on a resource.
-pub const Tag = struct {
-    name: []const u8,
-    value: []const u8,
-};
+/// A name and value ARM keeps on a resource: core's, so one set of tags
+/// serves every ARM module.
+pub const Tag = core.arm.Tag;
 
 pub const ResourceGroup = struct {
     name: []const u8,
@@ -57,8 +55,7 @@ pub const ResourceGroup = struct {
     /// The value of the tag named `name`, matched as ARM matches tag names,
     /// without regard to case; null when the group has none.
     pub fn tag(group: ResourceGroup, name: []const u8) ?[]const u8 {
-        for (group.tags) |t| if (std.ascii.eqlIgnoreCase(t.name, name)) return t.value;
-        return null;
+        return core.arm.findTag(group.tags, name);
     }
 };
 
