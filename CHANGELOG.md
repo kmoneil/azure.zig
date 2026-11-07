@@ -10,12 +10,14 @@ Until 1.0, minor versions may break the API; each entry says how.
   gnarl (0.7.0, named in `complexity.zon`): a zigvet finding, or a
   function newly over its complexity limit or worse than
   `complexity.baseline`, fails it.
-- `core` builds on rest-core v0.4.0 (90b1169), pinned by hash; 0.2.0 came
+- `core` builds on rest-core v0.5.0 (0a50462), pinned by hash; 0.2.0 came
   from azure.zig's trial of 0.1.0 and brings HEAD, a success's status and
   headers through `execute`, and ARM's correlation id, which ARM's hook now
   keeps in `Diagnostics` beside the request id, both logged escaped at
   debug level; 0.3.0 and 0.4.0 are the fixes from an audit of all of
-  rest-core, a cloud's hook checked when the engine binds it among them.
+  rest-core, a cloud's hook checked when the engine binds it among them;
+  0.5.0 signs each attempt afresh where a service asks (`Engine.signer`),
+  as storage's Shared Key does.
   Its transport, request
   loop, token seam, RSA signing and fakes. `core.arm` is Resource
   Manager's side of the loop: ARM's error body read into `Diagnostics`
@@ -84,8 +86,8 @@ Until 1.0, minor versions may break the API; each entry says how.
 - `storage`: Blob Storage at x-ms-version 2026-04-06: containers made,
   read and deleted; block blobs written in one request, read whole or in
   part, read for their properties, listed over every page (a prefix,
-  `after` a name, a delimiter, metadata) and deleted. Shared Key, signed
-  once per call within a ten-minute retry window, or an Entra token.
+  `after` a name, a delimiter, metadata) and deleted. Shared Key, each
+  attempt signed afresh with its own date, or an Entra token.
   Opaque ETags and the write and read conditions, a lost conditional
   write settled by a token in its metadata, accounts with a hierarchical
   namespace refused, the account read once for a client and every

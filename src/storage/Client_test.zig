@@ -405,7 +405,7 @@ test "the account's name and the user agent outlive the options they came in" {
     testing.allocator.free(account);
     testing.allocator.free(agent);
     _ = try client.putBlob("box", "k", "x", .{});
-    try testing.expectEqualStrings("azzigfake", client.account);
+    try testing.expectEqualStrings("azzigfake", client.accountName());
 }
 
 test "not asked: no account properties read" {
@@ -581,8 +581,8 @@ test "retries: a busy server's 503 again, Azurite's FeatureNotSupported never" {
     const written = try client.putBlob("box", "k", "x", .{});
     try testing.expectEqualStrings("0x2", written.etag.slice());
     try testing.expectEqual(2, fake.stream_requests.items.len);
-    // Signed once, and the same signature sent again.
-    try testing.expectEqualStrings(fake.stream_requests.items[0].header("Authorization").?, fake.stream_requests.items[1].header("Authorization").?);
+    // Each attempt signed afresh, over its own date.
+    for (fake.stream_requests.items[0..2]) |r| try expectSigned(r, "azzigexample1");
     try testing.expectError(error.FeatureNotSupported, client.putBlob("box", "k", "x", .{}));
     try testing.expectEqual(3, fake.stream_requests.items.len);
 }
@@ -683,4 +683,37 @@ test "fuzz storage: the client over FakeBlob is a bucket, lost answers and all" 
             "\x02\x00\x01\x00\x00\x00\x02\x01\x01\x00\x00\x00\x02\x01\x00",
         },
     });
+}
+
+test "Shared Key: a retry long after the first attempt carries a date and signature of its own" {
+    const later: core.testing.FakeTransport.Reply = .{ .respond = .{ .status = 503, .body = "", .headers = &.{
+        .{ .name = "x-ms-error-code", .value = "ServerBusy" },
+        .{ .name = "Retry-After", .value = "30" },
+    } } };
+    const ok: core.testing.FakeTransport.Reply = .{ .respond = .{ .status = 201, .body = "", .headers = &.{.{ .name = "ETag", .value = "\"0x3\"" }} } };
+    var fake: core.testing.FakeTransport = .init(testing.allocator, &.{ later, ok });
+    defer fake.deinit();
+    var clock: storage.testing.FakeClock = .{ .now_ns = 1_794_000_000 * std.time.ns_per_s };
+    var client: Client = try .init(testing.allocator, clock.io(), .{
+        .endpoint = .{ .account = .{ .name = "azzigexample1" } },
+        .credential = .{ .shared_key = storage.azurite_key },
+        .transport = fake.transport(),
+        .check_hierarchical_namespace = false,
+    });
+    defer client.deinit();
+    _ = try client.putBlob("box", "k", "x", .{});
+    const first = try fake.streamRequest(0);
+    const second = try fake.streamRequest(1);
+    // 30 s apart on the fake clock, so the dates differ, and so do the
+    // signatures; each is good for its own request.
+    try testing.expect(!std.mem.eql(u8, first.header("x-ms-date").?, second.header("x-ms-date").?));
+    try testing.expect(!std.mem.eql(u8, first.header("Authorization").?, second.header("Authorization").?));
+    try expectSigned(first, "azzigexample1");
+    try expectSigned(second, "azzigexample1");
+    // One date each: the signer's in place of the call's.
+    var dates: usize = 0;
+    for (second.headers) |h| if (std.ascii.eqlIgnoreCase(h.name, "x-ms-date")) {
+        dates += 1;
+    };
+    try testing.expectEqual(1, dates);
 }

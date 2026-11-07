@@ -123,10 +123,10 @@ account's key as the portal and ARM's `listKeys` give it; the account
 must allow Shared Key. The key is held decoded, and zeroed by `deinit`.
 
 A Shared Key signature is good for 15 minutes after the `x-ms-date` it
-covers. The client signs a call once, so no retry of it begins more than
-10 minutes after its first attempt; retries are azcore's, four attempts
-on 408, 429, 500, 502, 503 and 504, waiting what the service asks up to
-a minute.
+covers, so the client signs each attempt afresh, with a date of its own,
+through rest-core's per-attempt signer: a retry however late carries a
+good signature. Retries are azcore's, four attempts on 408, 429, 500,
+502, 503 and 504, waiting what the service asks up to a minute.
 
 ## Versions and conditions
 
