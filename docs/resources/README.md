@@ -7,10 +7,8 @@ the subscriptions its credential can see, resource groups to hold what it
 makes, and whether a subscription has registered the resource providers
 it will use.
 
-**Not yet measured against Azure.** The calls follow ARM's documentation,
-and `FakeResources` answers as the docs say ARM does. The live suite
-(`tests/resources_azure_integration.zig`) holds both to production once it
-has run.
+Measured against Azure on 2026-11-07, in eastus2; the live suite
+(`tests/resources_azure_integration.zig`) runs it again.
 
 ## A first program
 
