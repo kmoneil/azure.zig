@@ -55,7 +55,33 @@ Until 1.0, minor versions may break the API; each entry says how.
   deleted as a long-running operation, with `force_vms`; providers read
   and registered on request, never on their own. Names are checked before
   sending. `resources.testing.FakeResources` is Resource Manager in memory
-  for these calls. Not yet run against Azure.
+  for these calls. Run against Azure on 2026-11-07, answering as the fake
+  does.
+- `core.names`: ARM's naming rules (subscription ids, resource group names,
+  locations, tags), and `core.arm.Tag`, shared by every module that writes
+  to ARM; `resources` keeps its own names for them. `core.isRetryable`:
+  which transport failures are worth another attempt.
+- `network`: virtual networks with their subnets, subnets alone, and
+  network security groups with their rules, on Microsoft.Network at
+  2026-03-01, each create and delete a long-running operation. A network's
+  PUT always carries its subnets; a subnet's always carries
+  `defaultOutboundAccess`, false unless asked, and takes service endpoints
+  and a security group or NAT gateway by ARM id (`network.ids`). A rule
+  sends one address or port singular and more plural. Names, CIDRs and
+  priorities are checked before sending. `network.testing.FakeNetwork`
+  refuses what Network refuses, with its codes and statuses. Run against
+  Azure on 2026-11-07; the first run corrected two of the fake's answers.
+- `storage`: Blob Storage at x-ms-version 2026-04-06: containers made,
+  read and deleted; block blobs written in one request, read whole or in
+  part, read for their properties, listed over every page (a prefix,
+  `after` a name, a delimiter, metadata) and deleted. Shared Key, signed
+  once per call within a ten-minute retry window, or an Entra token.
+  Opaque ETags and the write and read conditions, a lost conditional
+  write settled by a token in its metadata, accounts with a hierarchical
+  namespace refused. `storage.testing.FakeBlob` answers as production
+  does. Its XML reader is gcp.zig's. Run against Azurite 3.37.0 (CI's
+  `azurite` job) and against Azure on 2026-11-07, with Shared Key and a
+  token.
 - `prices`: Linux VM prices from the Retail Prices API, spot or on demand,
   by region and size, every page read through the API's `:443` links; the
   Windows, Dev/Test, reservation, Low Priority and Cloud Services rows left
