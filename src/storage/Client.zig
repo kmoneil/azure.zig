@@ -24,12 +24,6 @@ const log = core.logging.Scoped(.azure_storage);
 /// on 2026-11-06, and one Azurite 3.37.0 accepts.
 pub const version = "2026-04-06";
 
-/// A Shared Key signature is good for 15 minutes after its `x-ms-date`.
-/// The client signs a call once, so no retry of it begins later than this
-/// after its first attempt, which leaves five minutes for the clocks to
-/// differ.
-pub const signed_retry_window_ms = 10 * 60 * 1000;
-
 /// Pages read at most for one listing, a guard against a server whose
 /// `NextMarker` never ends.
 pub const max_pages = 10_000;
@@ -39,30 +33,31 @@ io: std.Io,
 engine: hook.Engine,
 /// The transport the client made, when its options named none.
 http: ?*transport.HttpTransport,
-/// The account, as signed. Owned.
-account: []u8,
 /// `/{account}` for a path-style endpoint, else empty.
 path_prefix: []const u8,
 /// Base URL and path prefix, in one allocation.
 owned: []u8,
 /// Owned: the built-in transport borrows it.
 user_agent: []u8,
-/// The decoded account key, for Shared Key; null with a token.
-key: ?shared_key.Key,
 check_namespace: bool,
-/// With every sibling.
+/// With every sibling; the engine's signer points here.
 shared: *Shared,
 
 /// What the client knows of the account's namespace.
 pub const Namespace = enum(u8) { unchecked, flat, hierarchical, unknown };
 
-/// What a client and its siblings share: the account's namespace, read
-/// once by whichever asks first while the rest wait. Freed with the last
-/// of them.
+/// What a client and its siblings share: the account and its key, which
+/// the engine's signer reads at a fixed address, and the account's
+/// namespace, read once by whichever asks first while the rest wait.
+/// Freed with the last of them, the key wiped.
 const Shared = struct {
     refs: std.atomic.Value(u32) = .init(1),
     namespace: std.atomic.Value(Namespace) = .init(.unchecked),
     mutex: std.Io.Mutex = .init,
+    /// The account, as signed. Owned.
+    account: []u8,
+    /// The decoded account key, for Shared Key; null with a token.
+    key: ?shared_key.Key,
 };
 
 pub const Options = struct {
@@ -119,7 +114,7 @@ pub fn init(gpa: Allocator, io: std.Io, options: Options) InitError!Client {
     errdefer gpa.free(user_agent);
     const shared = try gpa.create(Shared);
     errdefer gpa.destroy(shared);
-    shared.* = .{};
+    shared.* = .{ .account = account_copy, .key = key };
 
     var http: ?*transport.HttpTransport = null;
     const t = options.transport orelse t: {
@@ -132,11 +127,9 @@ pub fn init(gpa: Allocator, io: std.Io, options: Options) InitError!Client {
         .gpa = gpa,
         .io = io,
         .http = http,
-        .account = account_copy,
         .owned = owned,
         .path_prefix = owned[base.len..],
         .user_agent = user_agent,
-        .key = key,
         .check_namespace = options.check_hierarchical_namespace,
         .shared = shared,
         .engine = .{
@@ -149,6 +142,7 @@ pub fn init(gpa: Allocator, io: std.Io, options: Options) InitError!Client {
                 .token => |p| p,
                 .shared_key => null,
             },
+            .signer = if (key != null) .{ .ptr = shared, .sign = signSharedKey } else null,
             .diagnostics = options.diagnostics,
             .retry = options.retry,
             .request_timeout_ms = options.request_timeout_ms,
@@ -167,12 +161,19 @@ pub fn deinit(self: *Client) void {
         h.deinit();
         self.gpa.destroy(h);
     }
-    if (self.key) |*k| std.crypto.secureZero(u8, &k.bytes);
-    if (self.shared.refs.fetchSub(1, .acq_rel) == 1) self.gpa.destroy(self.shared);
+    if (self.shared.refs.fetchSub(1, .acq_rel) == 1) {
+        if (self.shared.key) |*k| std.crypto.secureZero(u8, &k.bytes);
+        self.gpa.free(self.shared.account);
+        self.gpa.destroy(self.shared);
+    }
     self.gpa.free(self.owned);
-    self.gpa.free(self.account);
     self.gpa.free(self.user_agent);
     self.* = undefined;
+}
+
+/// The account, as signed.
+pub fn accountName(self: *const Client) []const u8 {
+    return self.shared.account;
 }
 
 /// A client on the same account, endpoint and credential, for a task that
@@ -186,8 +187,6 @@ pub fn deinit(self: *Client) void {
 pub fn sibling(self: *const Client, diagnostics: ?*core.Diagnostics) Allocator.Error!Client {
     const owned = try self.gpa.dupe(u8, self.owned);
     errdefer self.gpa.free(owned);
-    const account = try self.gpa.dupe(u8, self.account);
-    errdefer self.gpa.free(account);
     const user_agent = try self.gpa.dupe(u8, self.user_agent);
     errdefer self.gpa.free(user_agent);
     var http: ?*transport.HttpTransport = null;
@@ -200,7 +199,6 @@ pub fn sibling(self: *const Client, diagnostics: ?*core.Diagnostics) Allocator.E
     _ = self.shared.refs.fetchAdd(1, .monotonic);
     var copy = self.*;
     copy.owned = owned;
-    copy.account = account;
     copy.user_agent = user_agent;
     copy.path_prefix = owned[self.engine.base_url.len..];
     copy.engine.base_url = owned[0..self.engine.base_url.len];
@@ -619,8 +617,8 @@ fn send(self: *Client, response: *std.heap.ArenaAllocator, scratch: Allocator, r
     var target: Writer.Allocating = .init(scratch);
     writeTarget(&target.writer, self.path_prefix, req) catch return error.OutOfMemory;
     const full = target.written();
-    const path = full[0 .. std.mem.indexOfScalar(u8, full, '?') orelse full.len];
 
+    // With Shared Key the signer sets each attempt's date afresh.
     var date_buf: [core.http_date.len]u8 = undefined;
     const date = core.http_date.format(&date_buf, std.Io.Clock.real.now(self.io));
     const request_id = core.arm.clientRequestId(self.io);
@@ -631,13 +629,6 @@ fn send(self: *Client, response: *std.heap.ArenaAllocator, scratch: Allocator, r
         .{ .name = "x-ms-date", .value = date },
         .{ .name = "x-ms-client-request-id", .value = &request_id },
     });
-    if (self.key) |*key| try headers.append(scratch, .{ .name = "Authorization", .value = try shared_key.authorization(scratch, self.account, key, .{
-        .method = req.method,
-        .path = path,
-        .query = req.query,
-        .headers = headers.items,
-        .content_length = if (req.body) |b| b.len else 0,
-    }) });
 
     const segments = [_][]const u8{req.body orelse ""};
     return self.engine.executeStream(response, .{
@@ -646,12 +637,62 @@ fn send(self: *Client, response: *std.heap.ArenaAllocator, scratch: Allocator, r
         .headers = headers.items,
         .body = if (req.body != null) .{ .segments = &segments } else .none,
         .head_out = req.head_out,
-        .retry_window_ms = if (self.key != null) signed_retry_window_ms else null,
     }) catch |err| switch (err) {
         // Only a writer sink writes, and every call here buffers.
         error.WriteFailed => unreachable,
         else => |e| e,
     };
+}
+
+/// Shared Key, for each attempt as the transport will send it: a fresh
+/// `x-ms-date`, and the signature over it, in place of the call's. A
+/// signature is good for 15 minutes after its date, so a retry however
+/// late carries a good one.
+fn signSharedKey(ptr: *anyopaque, io: std.Io, scratch: Allocator, attempt: core.loop.Signable) core.loop.Signer.Error![]const Header {
+    const shared: *Shared = @ptrCast(@alignCast(ptr));
+    const key = &(shared.key orelse return error.TokenUnavailable);
+    var date_buf: [core.http_date.len]u8 = undefined;
+    const date = try scratch.dupe(u8, core.http_date.format(&date_buf, std.Io.Clock.real.now(io)));
+    var headers: std.ArrayList(Header) = .empty;
+    for (attempt.headers) |h| {
+        if (std.ascii.eqlIgnoreCase(h.name, "x-ms-date") or std.ascii.eqlIgnoreCase(h.name, "Authorization")) continue;
+        try headers.append(scratch, h);
+    }
+    try headers.append(scratch, .{ .name = "x-ms-date", .value = date });
+    const path, const query = try pathAndQuery(scratch, attempt.url);
+    const authorization = try shared_key.authorization(scratch, shared.account, key, .{
+        .method = attempt.method,
+        .path = path,
+        .query = query,
+        .headers = headers.items,
+        .content_type = attempt.content_type,
+        .content_length = attempt.content_length orelse 0,
+    });
+    return scratch.dupe(Header, &.{
+        .{ .name = "x-ms-date", .value = date },
+        .{ .name = "Authorization", .value = authorization },
+    });
+}
+
+/// A URL's path, as sent, and its query's parameters, decoded, as Shared
+/// Key signs them.
+fn pathAndQuery(scratch: Allocator, url: []const u8) Allocator.Error!struct { []const u8, []const shared_key.Param } {
+    const after_scheme = (std.mem.indexOf(u8, url, "://") orelse 0) + 3;
+    const slash = std.mem.indexOfScalarPos(u8, url, @min(after_scheme, url.len), '/') orelse url.len;
+    const rest = url[slash..];
+    const q = std.mem.indexOfScalar(u8, rest, '?') orelse return .{ if (rest.len == 0) "/" else rest, &.{} };
+    var params: std.ArrayList(shared_key.Param) = .empty;
+    var pairs = std.mem.splitScalar(u8, rest[q + 1 ..], '&');
+    while (pairs.next()) |pair| {
+        if (pair.len == 0) continue;
+        const eq = std.mem.indexOfScalar(u8, pair, '=') orelse pair.len;
+        const value = if (eq < pair.len) pair[eq + 1 ..] else "";
+        try params.append(scratch, .{
+            .name = (try validate.percentDecode(scratch, pair[0..eq])) orelse pair[0..eq],
+            .value = (try validate.percentDecode(scratch, value)) orelse value,
+        });
+    }
+    return .{ rest[0..q], params.items };
 }
 
 /// The request's path and query: the prefix, the container, the blob's
