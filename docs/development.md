@@ -12,7 +12,8 @@ zig build test                         # unit, property and fuzz-corpus tests, z
 zig build test --seed=0x1234           # the same, with other pseudo-random inputs
 zig build test -Doptimize=ReleaseFast  # the same, optimized; also ReleaseSafe
 zig build test -Dmodule=storage        # one module's unit tests: core, auth, resources, network, prices or storage
-zig build test -Dfuzz-runner --fuzz    # coverage-guided fuzzing, LLVM backend
+zig build fuzz                         # the fuzz properties alone, their inputs replayed
+zig build fuzz --fuzz=100000           # the same under the coverage-guided fuzzer (-Dfuzz-filter, -Dmodule)
 zig build test -Dtest-filter=fuzz      # only the tests whose names match
 zig build test-unit                    # the unit tests alone, compiling nothing else
 zig build test-integration             # against Azurite: storage (below)
