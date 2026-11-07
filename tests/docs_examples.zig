@@ -8,6 +8,7 @@ const std = @import("std");
 const resources = @import("resources");
 const network = @import("network");
 const prices = @import("prices");
+const storage = @import("storage");
 
 test "docs/resources: a client over FakeResources, and a list by tag" {
     const gpa = std.testing.allocator;
@@ -101,4 +102,45 @@ test "docs/prices: a client over FakePrices" {
     var spot = try client.list(.{ .sku = "Standard_D2as_v5" });
     defer spot.deinit();
     try std.testing.expectEqual(1, spot.value.prices.len);
+}
+
+test "docs/storage: a client over FakeBlob, a compare and swap, a listing after a name" {
+    const gpa = std.testing.allocator;
+    // snippet: fake-blob
+    var fake: storage.testing.FakeBlob = .init(gpa);
+    defer fake.deinit();
+    try fake.addContainer("bucket");
+    var clock: storage.testing.FakeClock = .{};
+    var client: storage.Client = try .init(gpa, clock.io(), .{
+        .endpoint = .{ .custom = .{ .url = storage.testing.FakeBlob.default_url, .account = "azzigfake" } },
+        .credential = .{ .shared_key = storage.azurite_key },
+        .transport = fake.transport(),
+    });
+    defer client.deinit();
+    // end snippet
+
+    // snippet: compare-and-swap
+    // Create only: PreconditionFailed when the blob is there already.
+    const first = try client.putBlob("bucket", "jobs/latest", "1", .{ .conditions = .if_absent });
+    // Replace only the version read: compare and swap.
+    var read = try client.getBlob("bucket", "jobs/latest", .{});
+    defer read.deinit();
+    _ = try client.putBlob("bucket", "jobs/latest", "2", .{ .conditions = .ifMatch(read.value.properties.etag) });
+    // That version is gone now, so a swap from it is refused.
+    const stale = client.putBlob("bucket", "jobs/latest", "3", .{ .conditions = .ifMatch(first.etag) });
+    // end snippet
+    try std.testing.expectError(error.PreconditionFailed, stale);
+
+    // snippet: list-after
+    for ([_][]const u8{ "events/000001", "events/000002", "events/000003" }) |name| {
+        _ = try client.putBlob("bucket", name, "e", .{});
+    }
+    // The names under events/ that sort after the last one read.
+    var newer = try client.listBlobs("bucket", .{ .prefix = "events/", .after = "events/000001" });
+    defer newer.deinit();
+    // newer.value.blobs: events/000002 and events/000003, each with its
+    // name, ETag, size and content type.
+    // end snippet
+    try std.testing.expectEqual(2, newer.value.blobs.len);
+    try std.testing.expectEqualStrings("events/000002", newer.value.blobs[0].name);
 }

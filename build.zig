@@ -23,7 +23,7 @@ pub fn build(b: *std.Build) void {
     });
 
     // The service modules, each at src/<name>/root.zig, as each lands: auth,
-    // storage, compute and imds to come. Each imports core alone, never
+    // compute and imds to come. Each imports core alone, never
     // auth or another service: credentials reach a service through core's
     // TokenProvider seam.
 
@@ -51,6 +51,15 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "core", .module = core }},
     });
 
+    // Blob Storage: containers and blobs, with conditions, Shared Key or a
+    // token, and a fake.
+    const storage = b.addModule("storage", .{
+        .root_source_file = b.path("src/storage/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "core", .module = core }},
+    });
+
     // Every test build runs under std's test runner with one fix, which
     // keeps std.debug from swallowing a task's cancel (see the top of
     // tools/test_runner.zig).
@@ -73,10 +82,11 @@ pub fn build(b: *std.Build) void {
         .{ "resources", resources },
         .{ "network", network },
         .{ "prices", prices },
+        .{ "storage", storage },
     };
     // One module's tests alone, for a fuzzing job that gives one module the
     // whole time budget.
-    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core, resources, network or prices");
+    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core, resources, network, prices or storage");
     if (only_module) |name| checkModule(&unit_modules, name);
 
     const test_step = b.step("test", "Run unit, property and fuzz-corpus tests, zig fmt --check, zigvet and gnarl");
@@ -129,17 +139,31 @@ pub fn build(b: *std.Build) void {
     // Integration suites, each under tests/ and each skipping cleanly when
     // what it needs is not configured. Against Azurite, the local Blob
     // emulator, which CI can run:
-    _ = b.step(
+    const integration_step = b.step(
         "test-integration",
-        "Run the integration suites against Azurite (none yet)",
+        "Run the integration suites against Azurite: AZURITE_TEST=1, Azurite on 127.0.0.1:10000 or AZURITE_BLOB_URL",
     );
+    // Blob Storage's calls against Azurite, which checks every signature.
+    const storage_azurite_tests = b.addTest(.{
+        .name = "storage-azurite-integration",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/storage_azurite_integration.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "storage", .module = storage }},
+        }),
+        .filters = test_filters,
+        .test_runner = test_runner,
+    });
+    integration_step.dependOn(&streamed(b, storage_azurite_tests).step);
+    test_step.dependOn(&storage_azurite_tests.step);
     // And against Azure itself, with credentials CI does not have, so a step
     // of its own, never part of `test-integration`. `zig build test`
     // compiles these suites, as it will the examples, so none can rot
     // between runs. docs/development.md says what each needs.
     const azure_step = b.step(
         "test-integration-azure",
-        "Run the suites against Azure: AZURE_TEST_SUBSCRIPTION and AZURE_TEST_TOKEN, and PRICES_TEST=1; each skips without its variables",
+        "Run the suites against Azure: AZURE_TEST_SUBSCRIPTION and AZURE_TEST_TOKEN; AZURE_TEST_STORAGE_ACCOUNT with AZURE_TEST_STORAGE_KEY or _TOKEN; PRICES_TEST=1; each skips without its variables",
     );
     // Resource groups made, read, listed by tag and deleted, and the sweep
     // of what crashed runs left.
@@ -192,6 +216,20 @@ pub fn build(b: *std.Build) void {
     });
     azure_step.dependOn(&streamed(b, prices_azure_tests).step);
     test_step.dependOn(&prices_azure_tests.step);
+    // Blob Storage in the test account, with Shared Key and with a token.
+    const storage_azure_tests = b.addTest(.{
+        .name = "storage-azure-integration",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/storage_azure_integration.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "storage", .module = storage }},
+        }),
+        .filters = test_filters,
+        .test_runner = test_runner,
+    });
+    azure_step.dependOn(&streamed(b, storage_azure_tests).step);
+    test_step.dependOn(&storage_azure_tests.step);
 
     // The code the guides show, run beside the unit tests so it cannot
     // drift; tools/check_docs.py holds the guides to this file and to the
@@ -206,6 +244,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "resources", .module = resources },
                 .{ .name = "network", .module = network },
                 .{ .name = "prices", .module = prices },
+                .{ .name = "storage", .module = storage },
             },
         }),
         .filters = test_filters,
@@ -219,6 +258,7 @@ pub fn build(b: *std.Build) void {
         .{ "prices_spot", "prices", prices },
         .{ "resources_subscriptions", "resources", resources },
         .{ "network_workers", "network", network },
+        .{ "blob_cp", "storage", storage },
     };
     for (examples) |example| {
         const exe = b.addExecutable(.{

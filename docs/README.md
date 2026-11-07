@@ -17,6 +17,12 @@ the guide for the service at hand, each added with its module.
 | [Resources](resources/README.md) | Subscriptions, resource groups made, read, listed by tag and deleted, providers' registration, and FakeResources |
 | [Network](network/README.md) | Virtual networks and their subnets, private by default, with service endpoints; network security groups and their rules; every write long-running; FakeNetwork |
 
+## Storage
+
+| Guide | What's in it |
+| --- | --- |
+| [Storage](storage/README.md) | Blob Storage: containers, blobs written, read whole or in part, listed and deleted under ETag conditions, Shared Key or a token, and FakeBlob |
+
 ## Prices
 
 | Guide | What's in it |

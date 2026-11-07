@@ -21,7 +21,7 @@ fake for testing code that uses it.
 | --- | --- | --- |
 | `core` | What every module shares: rest-core's HTTP transport with a per-request time limit, retries with jittered backoff that honour the delay Azure asks for, and the seam through which credentials reach each service; and Azure's own side of it, ARM's error bodies, retried set, pages and long-running operations | planned |
 | `auth` | Microsoft Entra ID credentials: a client secret, the Azure CLI's login, managed identity on a VM or App Service, a certificate, workload identity, and a default chain that finds whichever is there | planned |
-| `storage` | Blob Storage: blobs read and written under ETag conditions, Shared Key and SAS signing, large streamed transfers, leases and append blobs; tested against Azurite and Azure | planned |
+| [`storage`](docs/storage/README.md) | Blob Storage: blobs read and written under ETag conditions, Shared Key and SAS signing, large streamed transfers, leases and append blobs; tested against Azurite and Azure | in progress |
 | `compute` | Virtual machines, their sizes, zones and operations, and spot VMs created and deleted | planned |
 | `imds` | The Instance Metadata Service, on the VM itself: what the VM is, and Scheduled Events, the notice before a spot eviction | planned |
 | [`resources`](docs/resources/README.md) | Subscriptions; resource groups made, read, listed by tag and deleted; providers' registration; an in-memory Resource Manager for your own tests | in progress |
