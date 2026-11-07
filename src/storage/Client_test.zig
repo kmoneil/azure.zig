@@ -325,6 +325,89 @@ test "a hierarchical account is refused: by its properties, or by a listing's di
     try testing.expectError(error.HierarchicalNamespace, unread.put("k", "y", .{}));
 }
 
+fn accountChecks(fake: *const FakeBlob) usize {
+    var n: usize = 0;
+    for (fake.calls.items) |c| if (std.mem.eql(u8, c.query, "restype=account&comp=properties")) {
+        n += 1;
+    };
+    return n;
+}
+
+test "siblings: one account check for all of them, freed in any order" {
+    var rig: Rig = undefined;
+    try rig.init();
+    defer rig.fake.deinit();
+    var diags: [3]storage.Diagnostics = @splat(.{});
+    var siblings: [3]Client = undefined;
+    for (&siblings, &diags) |*s, *d| s.* = try rig.client.sibling(d);
+    // A custom transport is shared, as the built-in one is not.
+    for (siblings) |s| try testing.expectEqual(null, s.http);
+    _ = try siblings[1].putBlob("box", "k", "x", .{});
+    try testing.expectEqual(1, accountChecks(&rig.fake));
+    try testing.expectEqual(.flat, rig.client.namespace());
+    // The first goes; the others, the account known, never check again.
+    rig.client.deinit();
+    for (&siblings) |*s| {
+        var got = try s.getBlob("box", "k", .{});
+        got.deinit();
+        try testing.expectEqual(.flat, s.namespace());
+    }
+    try testing.expectEqual(1, accountChecks(&rig.fake));
+    // Each reports into its own Diagnostics.
+    try testing.expectError(error.NotFound, siblings[2].getBlob("box", "absent", .{}));
+    try testing.expectEqualStrings("BlobNotFound", diags[2].code());
+    try testing.expectEqualStrings("", diags[0].code());
+    for (&siblings) |*s| s.deinit();
+}
+
+test "siblings: a hierarchical account found by one is refused by all" {
+    var rig: Rig = undefined;
+    try rig.init();
+    defer rig.deinit();
+    rig.fake.hierarchical = true;
+    var other = try rig.client.sibling(null);
+    defer other.deinit();
+    try testing.expectError(error.HierarchicalNamespace, other.listBlobs("box", .{}));
+    const calls = rig.fake.calls.items.len;
+    try testing.expectError(error.HierarchicalNamespace, rig.put("k", "x", .{}));
+    try testing.expectEqual(calls, rig.fake.calls.items.len);
+}
+
+test "siblings: with the built-in transport each has a connection of its own" {
+    var clock: storage.testing.FakeClock = .{};
+    var client: Client = try .init(testing.allocator, clock.io(), .{
+        .endpoint = .{ .account = .{ .name = "azzigexample1" } },
+        .credential = .{ .shared_key = storage.azurite_key },
+    });
+    defer client.deinit();
+    var other = try client.sibling(null);
+    defer other.deinit();
+    try testing.expect(client.http != null and other.http != null and client.http != other.http);
+    try testing.expectEqualStrings(client.engine.base_url, other.engine.base_url);
+    try testing.expect(client.engine.base_url.ptr != other.engine.base_url.ptr);
+}
+
+test "the account's name and the user agent outlive the options they came in" {
+    var fake: FakeBlob = .init(testing.allocator);
+    defer fake.deinit();
+    try fake.addContainer("box");
+    var clock: storage.testing.FakeClock = .{};
+    const account = try testing.allocator.dupe(u8, "azzigfake");
+    const agent = try testing.allocator.dupe(u8, "app/1.0");
+    var client: Client = try .init(testing.allocator, clock.io(), .{
+        .endpoint = .{ .custom = .{ .url = FakeBlob.default_url, .account = account } },
+        .credential = .{ .shared_key = storage.azurite_key },
+        .transport = fake.transport(),
+        .user_agent = agent,
+    });
+    defer client.deinit();
+    @memset(account, 'x');
+    testing.allocator.free(account);
+    testing.allocator.free(agent);
+    _ = try client.putBlob("box", "k", "x", .{});
+    try testing.expectEqualStrings("azzigfake", client.account);
+}
+
 test "not asked: no account properties read" {
     var rig: Rig = undefined;
     try rig.initWith(.{ .shared_key = storage.azurite_key }, false);

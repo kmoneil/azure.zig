@@ -39,18 +39,31 @@ io: std.Io,
 engine: hook.Engine,
 /// The transport the client made, when its options named none.
 http: ?*transport.HttpTransport,
-/// The account, as signed.
-account: []const u8,
+/// The account, as signed. Owned.
+account: []u8,
 /// `/{account}` for a path-style endpoint, else empty.
 path_prefix: []const u8,
 /// Base URL and path prefix, in one allocation.
 owned: []u8,
+/// Owned: the built-in transport borrows it.
+user_agent: []u8,
 /// The decoded account key, for Shared Key; null with a token.
 key: ?shared_key.Key,
 check_namespace: bool,
-namespace: Namespace = .unchecked,
+/// With every sibling.
+shared: *Shared,
 
-const Namespace = enum { unchecked, flat, hierarchical, unknown };
+/// What the client knows of the account's namespace.
+pub const Namespace = enum(u8) { unchecked, flat, hierarchical, unknown };
+
+/// What a client and its siblings share: the account's namespace, read
+/// once by whichever asks first while the rest wait. Freed with the last
+/// of them.
+const Shared = struct {
+    refs: std.atomic.Value(u32) = .init(1),
+    namespace: std.atomic.Value(Namespace) = .init(.unchecked),
+    mutex: std.Io.Mutex = .init,
+};
 
 pub const Options = struct {
     endpoint: types.Endpoint,
@@ -100,11 +113,18 @@ pub fn init(gpa: Allocator, io: std.Io, options: Options) InitError!Client {
     if (!isBaseUrl(base)) return invalidAtInit(options.diagnostics, "an endpoint URL is http:// or https://, a host, and no path or trailing slash");
     const owned = try std.fmt.allocPrint(gpa, "{s}{s}{s}", .{ base, if (prefix) "/" else "", if (prefix) account else "" });
     errdefer gpa.free(owned);
+    const account_copy = try gpa.dupe(u8, account);
+    errdefer gpa.free(account_copy);
+    const user_agent = try gpa.dupe(u8, options.user_agent);
+    errdefer gpa.free(user_agent);
+    const shared = try gpa.create(Shared);
+    errdefer gpa.destroy(shared);
+    shared.* = .{};
 
     var http: ?*transport.HttpTransport = null;
     const t = options.transport orelse t: {
         const h = try gpa.create(transport.HttpTransport);
-        h.* = .init(gpa, io, options.user_agent);
+        h.* = .init(gpa, io, user_agent);
         http = h;
         break :t h.transport();
     };
@@ -112,11 +132,13 @@ pub fn init(gpa: Allocator, io: std.Io, options: Options) InitError!Client {
         .gpa = gpa,
         .io = io,
         .http = http,
-        .account = account,
+        .account = account_copy,
         .owned = owned,
         .path_prefix = owned[base.len..],
+        .user_agent = user_agent,
         .key = key,
         .check_namespace = options.check_hierarchical_namespace,
+        .shared = shared,
         .engine = .{
             .gpa = gpa,
             .io = io,
@@ -139,14 +161,58 @@ fn invalidAtInit(diagnostics: ?*core.Diagnostics, comptime why: []const u8) erro
     return error.InvalidArgument;
 }
 
+/// Frees the client. A sibling, or the client it came from, may go on.
 pub fn deinit(self: *Client) void {
     if (self.http) |h| {
         h.deinit();
         self.gpa.destroy(h);
     }
     if (self.key) |*k| std.crypto.secureZero(u8, &k.bytes);
+    if (self.shared.refs.fetchSub(1, .acq_rel) == 1) self.gpa.destroy(self.shared);
     self.gpa.free(self.owned);
+    self.gpa.free(self.account);
+    self.gpa.free(self.user_agent);
     self.* = undefined;
+}
+
+/// A client on the same account, endpoint and credential, for a task that
+/// runs beside this one's: a client takes one call at a time. It has a
+/// connection of its own when this client's transport is the built-in
+/// one, and shares a custom `Options.transport`, which must then take calls
+/// from several tasks at once, as it shares the token provider. It shares
+/// what this client knows of the account's namespace, read once by
+/// whichever client asks first. It reports into `diagnostics`, and is
+/// freed with its own `deinit`, before or after this one.
+pub fn sibling(self: *const Client, diagnostics: ?*core.Diagnostics) Allocator.Error!Client {
+    const owned = try self.gpa.dupe(u8, self.owned);
+    errdefer self.gpa.free(owned);
+    const account = try self.gpa.dupe(u8, self.account);
+    errdefer self.gpa.free(account);
+    const user_agent = try self.gpa.dupe(u8, self.user_agent);
+    errdefer self.gpa.free(user_agent);
+    var http: ?*transport.HttpTransport = null;
+    const t = if (self.http == null) self.engine.transport else t: {
+        const h = try self.gpa.create(transport.HttpTransport);
+        h.* = .init(self.gpa, self.io, user_agent);
+        http = h;
+        break :t h.transport();
+    };
+    _ = self.shared.refs.fetchAdd(1, .monotonic);
+    var copy = self.*;
+    copy.owned = owned;
+    copy.account = account;
+    copy.user_agent = user_agent;
+    copy.path_prefix = owned[self.engine.base_url.len..];
+    copy.engine.base_url = owned[0..self.engine.base_url.len];
+    copy.engine.transport = t;
+    copy.engine.diagnostics = diagnostics;
+    copy.http = http;
+    return copy;
+}
+
+/// What this client, and its siblings, know of the account's namespace.
+pub fn namespace(self: *const Client) Namespace {
+    return self.shared.namespace.load(.acquire);
 }
 
 /// 3 to 24 lowercase letters and digits.
@@ -504,7 +570,7 @@ fn listedBlob(self: *Client, out: Allocator, entry: xml.Element) Error!types.Lis
     const name = try self.nameOf(out, entry);
     const props = entry.child("Properties") orelse return self.badAnswer("a listed blob has no Properties", .{});
     if (props.childText("ResourceType")) |kind| if (std.mem.eql(u8, kind, "directory")) {
-        self.namespace = .hierarchical;
+        self.shared.namespace.store(.hierarchical, .release);
         return self.hierarchical();
     };
     const etag = Etag.parse(props.childText("Etag") orelse "") orelse return self.badAnswer("a listed blob's Etag is missing or malformed", .{});
@@ -635,17 +701,18 @@ fn rangeValue(a: Allocator, r: types.Range) Allocator.Error![]const u8 {
 
 // The account's namespace.
 
-/// Reads the account's properties on the first call, and refuses an
-/// account with a hierarchical namespace. A principal whose data role
-/// lacks the right to read them is answered 403: the namespace is then
-/// unknown, and a listing that holds a directory refuses instead.
+/// Reads the account's properties on the first call of this client or
+/// any sibling, and refuses an account with a hierarchical namespace. A
+/// principal whose data role lacks the right to read them is answered
+/// 403: the namespace is then unknown, and a listing that holds a
+/// directory refuses instead. Siblings that call while one reads wait for
+/// its answer.
 fn ensureFlat(self: *Client) Error!void {
     if (!self.check_namespace) return;
-    switch (self.namespace) {
-        .flat, .unknown => return,
-        .hierarchical => return self.hierarchical(),
-        .unchecked => {},
-    }
+    if (try self.known()) return;
+    try self.shared.mutex.lock(self.io);
+    defer self.shared.mutex.unlock(self.io);
+    if (try self.known()) return;
     var scratch: std.heap.ArenaAllocator = .init(self.gpa);
     defer scratch.deinit();
     var response: std.heap.ArenaAllocator = .init(self.gpa);
@@ -656,15 +723,25 @@ fn ensureFlat(self: *Client) Error!void {
     }) catch |err| switch (err) {
         error.PermissionDenied => {
             log.debug("the account's properties are not readable with this credential; its namespace is unknown", .{});
-            self.namespace = .unknown;
+            self.shared.namespace.store(.unknown, .release);
             self.engine.begin();
             return;
         },
         else => |e| return e,
     };
     const hns = headerOf(res.headers, "x-ms-is-hns-enabled") orelse "false";
-    self.namespace = if (std.ascii.eqlIgnoreCase(hns, "true")) .hierarchical else .flat;
-    if (self.namespace == .hierarchical) return self.hierarchical();
+    const verdict: Namespace = if (std.ascii.eqlIgnoreCase(hns, "true")) .hierarchical else .flat;
+    self.shared.namespace.store(verdict, .release);
+    if (verdict == .hierarchical) return self.hierarchical();
+}
+
+/// Whether the namespace is known, refusing a hierarchical one.
+fn known(self: *Client) error{HierarchicalNamespace}!bool {
+    return switch (self.namespace()) {
+        .flat, .unknown => true,
+        .hierarchical => self.hierarchical(),
+        .unchecked => false,
+    };
 }
 
 fn hierarchical(self: *Client) error{HierarchicalNamespace} {

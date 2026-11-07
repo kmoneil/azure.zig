@@ -88,7 +88,8 @@ Until 1.0, minor versions may break the API; each entry says how.
   once per call within a ten-minute retry window, or an Entra token.
   Opaque ETags and the write and read conditions, a lost conditional
   write settled by a token in its metadata, accounts with a hierarchical
-  namespace refused. `storage.testing.FakeBlob` answers as production
+  namespace refused, the account read once for a client and every
+  `sibling` made from it. `storage.testing.FakeBlob` answers as production
   does. Its XML reader is gcp.zig's. Run against Azurite 3.37.0 (CI's
   `azurite` job) and against Azure on 2026-11-07, with Shared Key and a
   token.

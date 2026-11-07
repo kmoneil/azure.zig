@@ -48,7 +48,7 @@ pub fn run(client: *storage.Client, diag: *storage.Diagnostics, target: Target) 
     const prefix = try std.fmt.bufPrint(&buf, "{s}/", .{&run_id});
 
     fact("made {s}: {}", .{ container, client.createContainer(container) catch |err| return explain(diag, err) });
-    fact("the account's namespace: {t}", .{client.namespace});
+    fact("the account's namespace: {t}", .{client.namespace()});
     _ = try sweep(client, diag);
     defer cleanUp(client, prefix);
 
