@@ -192,7 +192,7 @@ pub fn build(b: *std.Build) void {
     // between runs. docs/development.md says what each needs.
     const azure_step = b.step(
         "test-integration-azure",
-        "Run the suites against Azure: AZURE_TEST_SUBSCRIPTION and AZURE_TEST_TOKEN; AZURE_TEST_STORAGE_ACCOUNT with AZURE_TEST_STORAGE_KEY or _TOKEN; PRICES_TEST=1; each skips without its variables",
+        "Run the suites against Azure: AZURE_TEST_SUBSCRIPTION and AZURE_TEST_TOKEN; AZURE_TEST_STORAGE_ACCOUNT with AZURE_TEST_STORAGE_KEY or _TOKEN; AZURE_TEST_COMPUTE_VMS=1 for spot VMs; PRICES_TEST=1; each skips without its variables",
     );
     // Resource groups made, read, listed by tag and deleted, and the sweep
     // of what crashed runs left.
@@ -269,7 +269,12 @@ pub fn build(b: *std.Build) void {
             .root_source_file = b.path("tests/compute_azure_integration.zig"),
             .target = target,
             .optimize = optimize,
-            .imports = &.{.{ .name = "compute", .module = compute }},
+            .imports = &.{
+                .{ .name = "core", .module = core },
+                .{ .name = "compute", .module = compute },
+                .{ .name = "network", .module = network },
+                .{ .name = "resources", .module = resources },
+            },
         }),
         .filters = test_filters,
         .test_runner = test_runner,
@@ -323,6 +328,7 @@ pub fn build(b: *std.Build) void {
         .{ "blob_cp", &.{.{ .name = "storage", .module = storage }} },
         .{ "auth_subscriptions", &.{ .{ .name = "auth", .module = auth }, .{ .name = "resources", .module = resources } } },
         .{ "compute_sizes", &.{ .{ .name = "auth", .module = auth }, .{ .name = "compute", .module = compute } } },
+        .{ "spot_vm", &.{ .{ .name = "auth", .module = auth }, .{ .name = "compute", .module = compute } } },
     };
     for (examples) |example| {
         const exe = b.addExecutable(.{

@@ -209,7 +209,73 @@ test "docs/compute: a VM's state and the sizes that fit, over FakeCompute" {
     defer sizes.deinit();
     var buf: [16]compute.Size = undefined;
     const fit = compute.sizesThatFit(&buf, sizes.value, .{ .spot = true, .ephemeral_os_disk = true, .max_vcpus = 2 });
-    // fit: Standard_D2ds_v5 alone, its one zone "4"
+    // fit: Standard_D2ds_v5 in zone 4 alone, and Standard_D2ds_v7 in all four
     // end snippet
-    try std.testing.expectEqual(1, fit.len);
+    try std.testing.expectEqual(2, fit.len);
+}
+
+test "docs/compute: a spot VM made once, waited on, and its refusals by kind, over FakeCompute" {
+    const gpa = std.testing.allocator;
+    const sub = "0f9e8d7c-6b5a-4c3d-8e2f-1a0b9c8d7e6f";
+    const subnet = "/subscriptions/" ++ sub ++ "/resourceGroups/rg/providers/Microsoft.Network/virtualNetworks/pb-vnet/subnets/workers";
+    const public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGV4YW1wbGUga2V5LCBub3QgYSByZWFsIG9uZSwgYXp6aWc worker@example";
+    var fake: compute.testing.FakeCompute = try .init(gpa);
+    defer fake.deinit();
+    try fake.addMeasuredSizes();
+    var clock: compute.testing.FakeClock = .{};
+    var token: compute.StaticToken = .{ .token = "t" };
+    var diag: compute.Diagnostics = .{};
+    var client: compute.Client = try .init(gpa, clock.io(), .{ .token_provider = token.provider(), .transport = fake.transport(), .diagnostics = &diag });
+    defer client.deinit();
+
+    // snippet: spot-create
+    const spec: compute.VmSpec = .{
+        .location = "eastus2",
+        .size = "Standard_D2ds_v7",
+        .zone = "2",
+        // Where Size.ephemeralPlacement and Size.diskController say.
+        .os_disk = .{ .ephemeral = .nvme_disk },
+        .disk_controller = .nvme,
+        .admin_username = "worker",
+        .ssh_public_keys = &.{public_key},
+        .nic = .{ .subnet = subnet },
+        .tags = &.{.{ .name = "job", .value = "j1" }},
+        // Only this attempt at the VM carries it.
+        .attempt_tag = .{ .name = "attempt", .value = "j1-s0-a1" },
+    };
+    var op = client.beginCreateVirtualMachine(sub, "rg", "worker-1", spec) catch |err| {
+        // .capacity: another zone, size or region, or later. .quota: not
+        // until a VM ends.
+        std.log.err("{t}, {t}: {f}", .{ err, compute.RefusalClass.ofDiagnostics(&diag), diag });
+        return err;
+    };
+    defer op.deinit();
+    try client.waitOperation(&op, 10 * 60 * 1000);
+    // op.value.state is .succeeded, or .failed with op.value.failure_code
+    // end snippet
+    try std.testing.expectEqual(.succeeded, op.value.state);
+
+    // snippet: create-again
+    // The same attempt again, as after a timeout: the VM is this one's.
+    var again = try client.beginCreateVirtualMachine(sub, "rg", "worker-1", spec);
+    defer again.deinit();
+    // again.value.state == .succeeded, and no second VM
+    // end snippet
+    try std.testing.expectEqual(.succeeded, again.value.state);
+    try std.testing.expectEqual(1, fake.vms.items.len);
+
+    // snippet: refusal-class
+    // A second spot VM, past the test subscription's 3 spot vCPUs.
+    try std.testing.expectError(error.Conflict, client.beginCreateVirtualMachine(sub, "rg", "worker-2", spec));
+    try std.testing.expectEqual(.quota, compute.RefusalClass.ofDiagnostics(&diag));
+    // end snippet
+
+    // snippet: fake-compute-writes
+    try fake.failNextCreate("AllocationFailed", "Allocation failed.");
+    fake.lose_next_create = true; // made, then answered 504
+    fake.eviction_reads = 3; // an evicted VM's reads before it is gone
+    fake.operation_polls = 2; // an operation's reads before it ends
+    // end snippet
+    var evict = try client.beginDeleteVirtualMachine(sub, "rg", "worker-1", .{ .force = true });
+    defer evict.deinit();
 }

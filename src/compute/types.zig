@@ -116,9 +116,64 @@ pub const VirtualMachine = struct {
     state: State,
     time_created: []const u8 = "",
     tags: []const Tag = &.{},
+    /// Its NICs' ARM ids. Azure names a NIC made with the VM after the
+    /// spec's name for it, with a suffix of its own (measured:
+    /// `m0-vm1-nic-10e88ade`).
+    nics: []const []const u8 = &.{},
 
     pub fn tag(vm: VirtualMachine, name: []const u8) ?[]const u8 {
         return core.arm.findTag(vm.tags, name);
+    }
+};
+
+/// How a VM's disks attach: SCSI, as v5 sizes have, or NVMe, which v6's
+/// and v7's take alone.
+pub const DiskController = enum {
+    scsi,
+    nvme,
+
+    pub fn wireName(c: DiskController) []const u8 {
+        return switch (c) {
+            .scsi => "SCSI",
+            .nvme => "NVMe",
+        };
+    }
+};
+
+/// Where an ephemeral OS disk goes on the VM's host.
+pub const EphemeralPlacement = enum {
+    /// The temporary disk, as v5's `ds` sizes have.
+    resource_disk,
+    /// The host cache.
+    cache_disk,
+    /// The local NVMe disk, as v6's and v7's `ds` sizes have.
+    nvme_disk,
+
+    pub fn wireName(p: EphemeralPlacement) []const u8 {
+        return switch (p) {
+            .resource_disk => "ResourceDisk",
+            .cache_disk => "CacheDisk",
+            .nvme_disk => "NvmeDisk",
+        };
+    }
+};
+
+pub const DiskControllers = struct {
+    scsi: bool = true,
+    nvme: bool = false,
+};
+
+pub const EphemeralPlacements = struct {
+    resource_disk: bool = false,
+    cache_disk: bool = false,
+    nvme_disk: bool = false,
+
+    pub fn has(p: EphemeralPlacements, placement: EphemeralPlacement) bool {
+        return switch (placement) {
+            .resource_disk => p.resource_disk,
+            .cache_disk => p.cache_disk,
+            .nvme_disk => p.nvme_disk,
+        };
     }
 };
 
@@ -132,16 +187,44 @@ pub const Size = struct {
     spot: bool,
     /// Whether an ephemeral OS disk can go on it.
     ephemeral_os_disk: bool,
-    /// The temporary (resource) disk, where an ephemeral OS disk goes.
+    /// The temporary (resource) disk, where an ephemeral OS disk goes on
+    /// v5's sizes; 0 on v6's and v7's, which have an NVMe disk instead.
     resource_disk_mb: u64,
     /// The zones it may be made in, after the subscription's restrictions,
     /// in order. Empty where the region has none, or every one is
     /// restricted: then only a VM in no zone.
     zones: []const []const u8,
+    /// The controllers it takes (`DiskControllerTypes`): SCSI alone where
+    /// Resource SKUs name none, as for v5's sizes.
+    disk_controllers: DiskControllers = .{},
+    /// Where an ephemeral OS disk may go on it
+    /// (`SupportedEphemeralOSDiskPlacements`).
+    ephemeral_placements: EphemeralPlacements = .{},
+    /// The local NVMe disk (`NvmeDiskSizeInMiB`, in MiB), where an
+    /// ephemeral OS disk goes on v6's and v7's sizes.
+    nvme_disk_mb: u64 = 0,
+    /// False where Resource SKUs say `TrustedLaunchDisabled`: a spec's
+    /// default security, Trusted Launch, is refused on it.
+    trusted_launch: bool = true,
 
     pub fn inZone(s: Size, zone: []const u8) bool {
         for (s.zones) |z| if (std.mem.eql(u8, z, zone)) return true;
         return false;
+    }
+
+    /// Where a spec's ephemeral OS disk goes on this size: the resource
+    /// disk where it may, else the NVMe disk, else the cache; null where
+    /// none may.
+    pub fn ephemeralPlacement(s: Size) ?EphemeralPlacement {
+        if (!s.ephemeral_os_disk) return null;
+        for ([_]EphemeralPlacement{ .resource_disk, .nvme_disk, .cache_disk }) |p| if (s.ephemeral_placements.has(p)) return p;
+        return null;
+    }
+
+    /// The controller a spec names for this size: NVMe where it takes NVMe
+    /// alone, else null, Azure's default (SCSI).
+    pub fn diskController(s: Size) ?DiskController {
+        return if (s.disk_controllers.nvme and !s.disk_controllers.scsi) .nvme else null;
     }
 };
 
@@ -152,6 +235,8 @@ pub const Shape = struct {
     min_memory_gb: f64 = 0,
     spot: bool = false,
     ephemeral_os_disk: bool = false,
+    /// Sizes that take Trusted Launch, a spec's default security.
+    trusted_launch: bool = false,
     /// In this zone; null: any, a VM in no zone included.
     zone: ?[]const u8 = null,
 
@@ -161,6 +246,7 @@ pub const Shape = struct {
         if (s.memory_gb < shape.min_memory_gb) return false;
         if (shape.spot and !s.spot) return false;
         if (shape.ephemeral_os_disk and !s.ephemeral_os_disk) return false;
+        if (shape.trusted_launch and !s.trusted_launch) return false;
         if (shape.zone) |z| if (!s.inZone(z)) return false;
         return true;
     }
@@ -220,6 +306,74 @@ pub const ListOptions = struct {
     /// Only VMs with this tag and value. Compute has no filter of its own
     /// for tags: the client reads every page and keeps the matches.
     tag: ?Tag = null,
+};
+
+/// What kind of refusal a write met, from its HTTP status and ARM's code
+/// and message, so a scheduler can choose what to do next.
+pub const RefusalClass = enum {
+    /// No room now: `SkuNotAvailable`, `AllocationFailed`,
+    /// `ZonalAllocationFailed`, and the `Overconstrained` codes. Another
+    /// zone, size or region, or later. `SkuNotAvailable` is also what a
+    /// size or zone the subscription may never use gets (measured, 409),
+    /// and `listSizes` leaves those out: one of its sizes that meets it is
+    /// short of room.
+    capacity,
+    /// A quota, as `OperationNotAllowed` names one: "exceeding approved
+    /// LowPriorityCores quota" (measured, 409). Not until usage drops or
+    /// the limit rises.
+    quota,
+    /// 429: a throttle, Compute's or ARM's. `Diagnostics.retry_after_ms`
+    /// says how long, when the loop gave up waiting.
+    throttled,
+    /// The request itself: a 400, the spot codes among them, such as
+    /// `SpotPriceGreaterThanProvidedMaxPrice`.
+    invalid,
+    /// The subscription's Azure Policy (`RequestDisallowedByPolicy`, 403).
+    policy,
+    other,
+
+    /// The class of a refusal with HTTP `status`, ARM's `code` and its
+    /// message. A failed operation has no status of its own: pass 0.
+    pub fn of(status: u16, code: []const u8, message: []const u8) RefusalClass {
+        if (status == 429) return .throttled;
+        if (oneOf(code, &capacity_codes)) return .capacity;
+        if (oneOf(code, &.{ "OperationNotAllowed", "QuotaExceeded" }) and std.ascii.findIgnoreCase(message, "quota") != null) return .quota;
+        if (std.ascii.eqlIgnoreCase(code, "RequestDisallowedByPolicy")) return .policy;
+        if (status == 400 or oneOf(code, &invalid_codes)) return .invalid;
+        return .other;
+    }
+
+    /// The class of the latest call's refusal.
+    pub fn ofDiagnostics(d: *const core.Diagnostics) RefusalClass {
+        return of(d.http_status, d.code(), d.message());
+    }
+
+    /// The class of a failed operation's failure.
+    pub fn ofOperation(op: *const core.operation.Operation) RefusalClass {
+        return of(0, op.failure_code, op.failure_message);
+    }
+
+    const capacity_codes = [_][]const u8{
+        "SkuNotAvailable",
+        "AllocationFailed",
+        "ZonalAllocationFailed",
+        "OverconstrainedAllocationRequest",
+        "OverconstrainedZonalAllocationRequest",
+    };
+
+    const invalid_codes = [_][]const u8{
+        "InvalidParameter",
+        "AzureSpotIsNotSupportedForThisVMSize",
+        "SpotPriceGreaterThanProvidedMaxPrice",
+        "MaxPriceValueInvalid",
+        "EvictionPolicyCanBeSetOnlyOnAzureSpotVirtualMachines",
+        "AzureSpotFeatureNotEnabledForSubscription",
+    };
+
+    fn oneOf(code: []const u8, codes: []const []const u8) bool {
+        for (codes) |c| if (std.ascii.eqlIgnoreCase(code, c)) return true;
+        return false;
+    }
 };
 
 const testing = std.testing;

@@ -91,10 +91,26 @@ Until 1.0, minor versions may break the API; each entry says how.
   `sizesThatFit` a shape, locations with their zone mappings, and usages,
   the spot quota among them. `compute.testing.FakeCompute` holds what
   t19's m0 measured on 2026-11-07. Run against Azure the same day.
+- `compute`, its writes (m2): a VM made from a `VmSpec` (spot and
+  evicted by deletion by default, Ubuntu 24.04, an ephemeral OS disk at
+  the placement its size takes, the disk controller, Trusted Launch
+  named outright, SSH keys, custom and user data, one NIC made and
+  deleted with the VM, identities, tags) or from a JSON body of the
+  caller's own, with `If-None-Match: *`; a create that meets a VM, or
+  loses its answer, reads it and takes it for its own when it carries
+  the spec's attempt tag. Delete (forced or not), deallocate, start,
+  restart, `simulateEviction`, `waitOperation`, and `preview` of every
+  write. `RefusalClass` tells capacity, quota, throttling, invalid
+  requests and policy apart, for a refusal and a failed operation alike.
+  Sizes now say their disk controllers, ephemeral placements, NVMe disk
+  and Trusted Launch, and a VM its NICs' ids. FakeCompute makes VMs, with
+  operations, quotas, refused sizes and zones, failed allocations, lost
+  answers and evictions. Run against Azure on 2026-11-08 with spot VMs.
 - `core.names`: a tag's name and value must be valid UTF-8, as the JSON
-  body they go in must be; `resources` and `network` refuse one that is
-  not, where they sent a body that was not JSON. `network` holds a rule's
-  description and an ARM id to the same.
+  body they go in must be; `resources`, `network` and `compute` refuse
+  one that is not, where they sent a body that was not JSON. `network`
+  holds a rule's description and an ARM id to the same. `core` exports
+  rest-core's `base64` and `PreparedRequest`.
 - `storage`: Blob Storage at x-ms-version 2026-04-06: containers made,
   read and deleted; block blobs written in one request, read whole or in
   part, read for their properties, listed over every page (a prefix,

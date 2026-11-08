@@ -27,7 +27,7 @@ the guide for the service at hand, each added with its module.
 
 | Guide | What's in it |
 | --- | --- |
-| [Compute](compute/README.md) | A VM's state from its instance view, VMs by group, subscription or region, the sizes a region offers, zones and their physical places, quotas, and FakeCompute |
+| [Compute](compute/README.md) | Spot VMs made once from a `VmSpec`, deleted, deallocated, started, restarted and evicted, every write previewed, refusals by kind; a VM's state from its instance view, VMs by group, subscription or region, the sizes a region offers with their disks, zones and their physical places, quotas, and FakeCompute |
 
 ## Storage
 

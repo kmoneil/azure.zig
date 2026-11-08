@@ -16,16 +16,17 @@ const vm_created = @embedFile("testdata/vm_created.json");
 const skus_eastus2 = @embedFile("testdata/skus_eastus2.json");
 const locations = @embedFile("testdata/locations.json");
 const instance_view_spec = @embedFile("testdata/instance_view_spec.json");
+const skus_disks = @embedFile("testdata/skus_eastus2_disks.json");
 
 /// A client over a scripted transport, its requests kept.
-const Scripted = struct {
+pub const Scripted = struct {
     fake: FakeTransport,
     clock: compute.testing.FakeClock,
     token: compute.StaticToken,
     diag: compute.Diagnostics,
     client: Client,
 
-    fn init(s: *Scripted, script: []const FakeTransport.Reply) !void {
+    pub fn init(s: *Scripted, script: []const FakeTransport.Reply) !void {
         s.fake = .init(testing.allocator, script);
         s.clock = .{};
         s.token = .{ .token = "t" };
@@ -33,7 +34,7 @@ const Scripted = struct {
         s.client = try .init(testing.allocator, s.clock.io(), .{ .token_provider = s.token.provider(), .transport = s.fake.transport(), .diagnostics = &s.diag });
     }
 
-    fn deinit(s: *Scripted) void {
+    pub fn deinit(s: *Scripted) void {
         s.client.deinit();
         s.fake.deinit();
     }
@@ -122,6 +123,40 @@ test "sizes as production offered them: D2ds_v5 in zone 4 alone, D2as_v5 not at 
     try testing.expectStringEndsWith(req.url, "/providers/Microsoft.Compute/skus?api-version=2021-07-01&$filter=location%20eq%20%27eastus2%27");
 }
 
+test "disks as production offered them: NVMe alone on v7, both controllers, both placements, no Trusted Launch" {
+    var s: Scripted = undefined;
+    try s.init(&.{ok(skus_disks)});
+    defer s.deinit();
+    var sizes = try s.client.listSizes(sub, "eastus2");
+    defer sizes.deinit();
+    // D2pds_v5 carries a Location restriction: gone.
+    try testing.expectEqual(5, sizes.value.len);
+    const want = [_]struct { []const u8, compute.DiskControllers, ?compute.EphemeralPlacement, bool }{
+        .{ "Standard_D2ds_v5", .{}, .resource_disk, true },
+        .{ "Standard_D2ds_v7", .{ .scsi = false, .nvme = true }, .nvme_disk, true },
+        .{ "Standard_D2s_v7", .{ .scsi = false, .nvme = true }, null, true },
+        .{ "Standard_E2bds_v5", .{ .scsi = true, .nvme = true }, .resource_disk, true },
+        .{ "Standard_M8ms", .{}, .resource_disk, false },
+    };
+    for (want) |w| {
+        const size = for (sizes.value) |x| {
+            if (std.mem.eql(u8, x.name, w[0])) break x;
+        } else return error.TestUnexpectedResult;
+        try testing.expectEqual(w[1], size.disk_controllers);
+        try testing.expectEqual(w[2], size.ephemeralPlacement());
+        try testing.expectEqual(w[3], size.trusted_launch);
+    }
+    const v7 = sizes.value[1];
+    try testing.expectEqual(112640, v7.nvme_disk_mb);
+    try testing.expectEqual(0, v7.resource_disk_mb);
+    try testing.expectEqual(compute.DiskController.nvme, v7.diskController().?);
+    try testing.expectEqual(4, v7.zones.len);
+    // Both controllers: Azure's default, SCSI, needs no naming.
+    try testing.expectEqual(null, sizes.value[3].diskController());
+    var buf: [8]compute.Size = undefined;
+    try testing.expectEqual(4, compute.sizesThatFit(&buf, sizes.value, .{ .trusted_launch = true }).len);
+}
+
 test "locations as production listed them: eastus2's four zones and where each is" {
     var s: Scripted = undefined;
     try s.init(&.{ok(locations)});
@@ -149,14 +184,14 @@ test "usages: the spot quota by name" {
 }
 
 /// A client over FakeCompute.
-const Rig = struct {
+pub const Rig = struct {
     fake: FakeCompute,
     clock: compute.testing.FakeClock,
     token: compute.StaticToken,
     diag: compute.Diagnostics,
     client: Client,
 
-    fn init(r: *Rig) !void {
+    pub fn init(r: *Rig) !void {
         r.fake = try .init(testing.allocator);
         r.clock = .{};
         r.token = .{ .token = "t" };
@@ -164,7 +199,7 @@ const Rig = struct {
         r.client = try .init(testing.allocator, r.clock.io(), .{ .token_provider = r.token.provider(), .transport = r.fake.transport(), .diagnostics = &r.diag });
     }
 
-    fn deinit(r: *Rig) void {
+    pub fn deinit(r: *Rig) void {
         r.client.deinit();
         r.fake.deinit();
     }
@@ -226,11 +261,23 @@ test "FakeCompute: the measured sizes, zones and quotas" {
     try r.fake.addMeasuredSizes();
     var sizes = try r.client.listSizes(sub, "eastus2");
     defer sizes.deinit();
-    try testing.expectEqual(2, sizes.value.len);
+    // D2as_v5 and B2s carry a Location restriction: gone.
+    try testing.expectEqual(4, sizes.value.len);
     for (sizes.value) |s| {
-        try testing.expectEqual(1, s.zones.len);
-        try testing.expectEqualStrings("4", s.zones[0]);
+        const v5 = std.mem.endsWith(u8, s.name, "_v5");
+        try testing.expectEqual(@as(usize, if (v5) 1 else 4), s.zones.len);
+        if (v5) try testing.expectEqualStrings("4", s.zones[0]);
+        try testing.expectEqual(!v5, s.disk_controllers.nvme);
+        try testing.expectEqual(v5, s.disk_controllers.scsi);
     }
+    const d2ds_v7 = sizes.value[2];
+    try testing.expectEqualStrings("Standard_D2ds_v7", d2ds_v7.name);
+    try testing.expectEqual(compute.EphemeralPlacement.nvme_disk, d2ds_v7.ephemeralPlacement().?);
+    try testing.expectEqual(compute.DiskController.nvme, d2ds_v7.diskController().?);
+    try testing.expectEqual(112640, d2ds_v7.nvme_disk_mb);
+    try testing.expectEqual(compute.EphemeralPlacement.resource_disk, sizes.value[0].ephemeralPlacement().?);
+    try testing.expectEqual(null, sizes.value[0].diskController());
+    try testing.expectEqual(null, sizes.value[3].ephemeralPlacement());
     var none = try r.client.listSizes(sub, "westus2");
     defer none.deinit();
     try testing.expectEqual(0, none.value.len);
