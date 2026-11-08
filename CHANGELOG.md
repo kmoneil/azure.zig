@@ -91,6 +91,10 @@ Until 1.0, minor versions may break the API; each entry says how.
   `sizesThatFit` a shape, locations with their zone mappings, and usages,
   the spot quota among them. `compute.testing.FakeCompute` holds what
   t19's m0 measured on 2026-11-07. Run against Azure the same day.
+- `core.names`: a tag's name and value must be valid UTF-8, as the JSON
+  body they go in must be; `resources` and `network` refuse one that is
+  not, where they sent a body that was not JSON. `network` holds a rule's
+  description and an ARM id to the same.
 - `storage`: Blob Storage at x-ms-version 2026-04-06: containers made,
   read and deleted; block blobs written in one request, read whole or in
   part, read for their properties, listed over every page (a prefix,

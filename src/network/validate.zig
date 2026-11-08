@@ -133,19 +133,21 @@ pub fn isPortRange(text: []const u8) bool {
     return low <= high;
 }
 
-/// A rule's description: up to 140 bytes, no control bytes.
+/// A rule's description: up to 140 bytes of valid UTF-8, no control
+/// bytes.
 pub fn isDescription(text: []const u8) bool {
-    if (text.len > 140) return false;
+    if (text.len > 140 or !std.unicode.utf8ValidateSlice(text)) return false;
     for (text) |c| if (c < 0x20 or c == 0x7f) return false;
     return true;
 }
 
 /// The ARM id of a Microsoft.Network resource of `kind`, such as
 /// `networkSecurityGroups`: `/subscriptions/.../providers/Microsoft.Network/{kind}/{name}`,
-/// in any case, and no spaces or control bytes. It catches a bare name
-/// given where the id belongs, or another kind's id.
+/// in any case, valid UTF-8, and no spaces or control bytes. It catches a
+/// bare name given where the id belongs, or another kind's id.
 pub fn isNetworkId(text: []const u8, comptime kind: []const u8) bool {
     if (text.len > 1024 or !std.ascii.startsWithIgnoreCase(text, "/subscriptions/")) return false;
+    if (!std.unicode.utf8ValidateSlice(text)) return false;
     for (text) |c| if (c <= 0x20 or c == 0x7f) return false;
     const marker = "/providers/microsoft.network/" ++ kind ++ "/";
     if (text.len <= marker.len) return false;
@@ -198,6 +200,8 @@ test "isService, isAddressPrefix, isPortRange, isDescription" {
     try testing.expect(isDescription(&@as([140]u8, @splat('d'))));
     try testing.expect(!isDescription(&@as([141]u8, @splat('d'))));
     try testing.expect(!isDescription("a\tb"));
+    try testing.expect(isDescription("SSH f\xc3\xbcr Ops"));
+    try testing.expect(!isDescription("SSH \xff"));
 }
 
 test "isNetworkId: the kind's id, in any case, and nothing else" {
@@ -205,6 +209,7 @@ test "isNetworkId: the kind's id, in any case, and nothing else" {
     try testing.expect(isNetworkId(nsg, "networkSecurityGroups"));
     try testing.expect(isNetworkId("/SUBSCRIPTIONS/x/resourcegroups/rg/providers/microsoft.network/networksecuritygroups/n", "networkSecurityGroups"));
     try testing.expect(!isNetworkId(nsg, "natGateways"));
+    try testing.expect(!isNetworkId("/subscriptions/x/resourceGroups/rg\xff/providers/Microsoft.Network/networkSecurityGroups/n", "networkSecurityGroups"));
     for ([_][]const u8{ "pb-nsg", "", "/subscriptions/x/resourceGroups/rg/providers/Microsoft.Network/networkSecurityGroups/", "/subscriptions/x/resourceGroups/rg/providers/Microsoft.Network/networkSecurityGroups/a b" }) |s| {
         try testing.expect(!isNetworkId(s, "networkSecurityGroups"));
     }

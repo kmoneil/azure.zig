@@ -33,16 +33,17 @@ pub fn isLocation(text: []const u8) bool {
     return true;
 }
 
-/// A tag's name: 1 to 512 bytes, none of `<>%&\?/` and no control bytes.
+/// A tag's name: 1 to 512 bytes of valid UTF-8, none of `<>%&\?/` and no
+/// control bytes. A tag goes into a JSON body, which is UTF-8.
 pub fn isTagName(text: []const u8) bool {
-    if (text.len == 0 or text.len > 512) return false;
+    if (text.len == 0 or text.len > 512 or !std.unicode.utf8ValidateSlice(text)) return false;
     for (text) |c| if (c < 0x20 or c == 0x7f or std.mem.indexOfScalar(u8, "<>%&\\?/", c) != null) return false;
     return true;
 }
 
-/// A tag's value: up to 256 bytes, no control bytes.
+/// A tag's value: up to 256 bytes of valid UTF-8, no control bytes.
 pub fn isTagValue(text: []const u8) bool {
-    if (text.len > 256) return false;
+    if (text.len > 256 or !std.unicode.utf8ValidateSlice(text)) return false;
     for (text) |c| if (c < 0x20 or c == 0x7f) return false;
     return true;
 }
@@ -60,8 +61,8 @@ pub fn groupProblem(subscription: []const u8, group: []const u8) ?[]const u8 {
 /// tag names ignore case.
 pub fn tagsProblem(tags: []const arm.Tag) ?[]const u8 {
     for (tags, 0..) |t, i| {
-        if (!isTagName(t.name)) return "a tag name is 1 to 512 bytes, none of <>%&\\?/";
-        if (!isTagValue(t.value)) return "a tag value is up to 256 bytes, no control bytes";
+        if (!isTagName(t.name)) return "a tag name is 1 to 512 bytes of UTF-8, none of <>%&\\?/";
+        if (!isTagValue(t.value)) return "a tag value is up to 256 bytes of UTF-8, no control bytes";
         for (tags[0..i]) |earlier| {
             if (std.ascii.eqlIgnoreCase(earlier.name, t.name)) return "two tags named alike: ARM's tag names ignore case";
         }
@@ -88,10 +89,15 @@ test "isLocation, isTagName, isTagValue" {
     try testing.expect(isLocation("eastus2"));
     for ([_][]const u8{ "", "east us", "east/us" }) |s| try testing.expect(!isLocation(s));
     try testing.expect(isTagName("azzig-run"));
-    for ([_][]const u8{ "", "a/b", "a?b", "a%b", "a\nb" }) |s| try testing.expect(!isTagName(s));
+    try testing.expect(isTagName("gr\xc3\xbcn"));
+    for ([_][]const u8{ "", "a/b", "a?b", "a%b", "a\nb", "a\xff", "gr\xc3" }) |s| try testing.expect(!isTagName(s));
     try testing.expect(isTagValue(""));
     try testing.expect(isTagValue("2026-11-06T22:00:00Z"));
+    try testing.expect(isTagValue("gr\xc3\xbcn"));
     try testing.expect(!isTagValue("a\nb"));
+    // Not UTF-8, which a JSON body must be: a stray byte, a cut sequence.
+    try testing.expect(!isTagValue("\xff"));
+    try testing.expect(!isTagValue("gr\xc3"));
     try testing.expect(!isTagValue(&@as([257]u8, @splat('x'))));
 }
 
