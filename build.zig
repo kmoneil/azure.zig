@@ -30,8 +30,16 @@ pub fn build(b: *std.Build) void {
         .imports = &.{.{ .name = "core", .module = core }},
     });
 
+    // Virtual machines: their state, sizes, zones and quotas.
+    const compute = b.addModule("compute", .{
+        .root_source_file = b.path("src/compute/root.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{.{ .name = "core", .module = core }},
+    });
+
     // The service modules, each at src/<name>/root.zig, as each lands:
-    // compute and imds to come. Each imports core alone, never
+    // imds to come. Each imports core alone, never
     // auth or another service: credentials reach a service through core's
     // TokenProvider seam.
 
@@ -83,10 +91,11 @@ pub fn build(b: *std.Build) void {
         .{ "network", network },
         .{ "prices", prices },
         .{ "storage", storage },
+        .{ "compute", compute },
     };
     // One module's tests alone, for a fuzzing job that gives one module the
     // whole time budget.
-    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core, auth, resources, network, prices or storage");
+    const only_module = b.option([]const u8, "module", "Run only this module's unit tests: core, auth, resources, network, prices, storage or compute");
     if (only_module) |name| checkModule(&unit_modules, name);
 
     const test_step = b.step("test", "Run unit, property and fuzz-corpus tests, zig fmt --check, zigvet and gnarl");
@@ -253,6 +262,20 @@ pub fn build(b: *std.Build) void {
     });
     azure_step.dependOn(&streamed(b, auth_azure_tests).step);
     test_step.dependOn(&auth_azure_tests.step);
+    // Compute's reads: sizes, zones, quotas and VMs; nothing made.
+    const compute_azure_tests = b.addTest(.{
+        .name = "compute-azure-integration",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/compute_azure_integration.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{.{ .name = "compute", .module = compute }},
+        }),
+        .filters = test_filters,
+        .test_runner = test_runner,
+    });
+    azure_step.dependOn(&streamed(b, compute_azure_tests).step);
+    test_step.dependOn(&compute_azure_tests.step);
     // Blob Storage in the test account, with Shared Key and with a token.
     const storage_azure_tests = b.addTest(.{
         .name = "storage-azure-integration",
@@ -283,6 +306,7 @@ pub fn build(b: *std.Build) void {
                 .{ .name = "prices", .module = prices },
                 .{ .name = "storage", .module = storage },
                 .{ .name = "auth", .module = auth },
+                .{ .name = "compute", .module = compute },
             },
         }),
         .filters = test_filters,
@@ -298,6 +322,7 @@ pub fn build(b: *std.Build) void {
         .{ "network_workers", &.{.{ .name = "network", .module = network }} },
         .{ "blob_cp", &.{.{ .name = "storage", .module = storage }} },
         .{ "auth_subscriptions", &.{ .{ .name = "auth", .module = auth }, .{ .name = "resources", .module = resources } } },
+        .{ "compute_sizes", &.{ .{ .name = "auth", .module = auth }, .{ .name = "compute", .module = compute } } },
     };
     for (examples) |example| {
         const exe = b.addExecutable(.{

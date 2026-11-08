@@ -23,6 +23,12 @@ the guide for the service at hand, each added with its module.
 | [Resources](resources/README.md) | Subscriptions, resource groups made, read, listed by tag and deleted, providers' registration, and FakeResources |
 | [Network](network/README.md) | Virtual networks and their subnets, private by default, with service endpoints; network security groups and their rules; every write long-running; FakeNetwork |
 
+## Compute
+
+| Guide | What's in it |
+| --- | --- |
+| [Compute](compute/README.md) | A VM's state from its instance view, VMs by group, subscription or region, the sizes a region offers, zones and their physical places, quotas, and FakeCompute |
+
 ## Storage
 
 | Guide | What's in it |

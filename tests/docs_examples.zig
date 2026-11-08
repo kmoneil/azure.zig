@@ -10,6 +10,7 @@ const network = @import("network");
 const prices = @import("prices");
 const storage = @import("storage");
 const auth = @import("auth");
+const compute = @import("compute");
 
 test "docs/resources: a client over FakeResources, and a list by tag" {
     const gpa = std.testing.allocator;
@@ -174,4 +175,41 @@ test "docs/auth: a ClientSecret over FakeEntra, one credential for two scopes" {
     // end snippet
     try std.testing.expect(!std.mem.eql(u8, for_arm, for_blobs));
     try std.testing.expectEqual(2, fake.requests);
+}
+
+test "docs/compute: a VM's state and the sizes that fit, over FakeCompute" {
+    const gpa = std.testing.allocator;
+    const sub = "0f9e8d7c-6b5a-4c3d-8e2f-1a0b9c8d7e6f";
+    // snippet: fake-compute
+    var fake: compute.testing.FakeCompute = try .init(gpa);
+    defer fake.deinit();
+    try fake.addMeasuredSizes();
+    try fake.addVm(.{ .subscription = sub, .group = "rg", .name = "worker-1", .provisioning = "Failed", .failure = "AllocationFailed", .power = null });
+    var clock: compute.testing.FakeClock = .{};
+    var token: compute.StaticToken = .{ .token = "t" };
+    var client: compute.Client = try .init(gpa, clock.io(), .{
+        .token_provider = token.provider(),
+        .transport = fake.transport(),
+    });
+    defer client.deinit();
+    // end snippet
+
+    // snippet: vm-state
+    var vm = try client.getVirtualMachine(sub, "rg", "worker-1");
+    defer vm.deinit();
+    if (vm.value.state.isFailed()) {
+        // The allocation failed (vm.value.state.failure names why): the VM
+        // is there, stuck, until it is deleted.
+    }
+    // end snippet
+    try std.testing.expect(vm.value.state.isFailed());
+
+    // snippet: sizes-that-fit
+    var sizes = try client.listSizes(sub, "eastus2");
+    defer sizes.deinit();
+    var buf: [16]compute.Size = undefined;
+    const fit = compute.sizesThatFit(&buf, sizes.value, .{ .spot = true, .ephemeral_os_disk = true, .max_vcpus = 2 });
+    // fit: Standard_D2ds_v5 alone, its one zone "4"
+    // end snippet
+    try std.testing.expectEqual(1, fit.len);
 }
