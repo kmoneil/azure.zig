@@ -27,6 +27,11 @@ pub const rsa = rest_core.rsa;
 pub const Owned = rest_core.Owned;
 pub const WipingAllocator = rest_core.WipingAllocator;
 pub const logging = rest_core.logging;
+/// Base64 as JSON APIs carry bytes, streamed into a JSON writer.
+pub const base64 = rest_core.base64;
+/// A write as a client would send it, built without sending it: what a
+/// module's preview gives.
+pub const PreparedRequest = rest_core.PreparedRequest;
 
 /// Fakes and helpers, for tests only: rest-core's, and ARM's answers.
 pub const testing = @import("testing.zig");

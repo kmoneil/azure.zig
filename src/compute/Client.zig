@@ -1,7 +1,7 @@
-//! The compute client's reads, on Resource Manager: virtual machines and
-//! their state, the sizes a region offers this subscription, its zones, and
-//! its quotas. Made with `init`, freed with `deinit`; one task uses it at a
-//! time.
+//! The compute client, on Resource Manager: virtual machines made, read,
+//! deallocated, started, restarted, evicted and deleted; the sizes a region
+//! offers this subscription, its zones, and its quotas. Made with `init`,
+//! freed with `deinit`; one task uses it at a time.
 
 const Client = @This();
 
@@ -10,8 +10,10 @@ const Allocator = std.mem.Allocator;
 const core = @import("core");
 const transport = core.transport;
 const types = @import("types.zig");
+const spec_ = @import("spec.zig");
 
 const Engine = core.arm.Engine(.azure_compute);
+const Operation = core.operation.Operation;
 
 /// Microsoft.Compute's virtual machines and usages.
 pub const api_version = "2026-04-01";
@@ -54,6 +56,8 @@ pub const Error = core.arm.Hook.RefusalError || transport.Error || core.TokenPro
     InvalidArgument,
     /// An answer that is not the JSON ARM sends. `Diagnostics` says which.
     InvalidResponse,
+    /// A write whose answer cannot be followed.
+    InvalidOperation,
 };
 
 pub fn init(gpa: Allocator, io: std.Io, options: Options) Allocator.Error!Client {
@@ -98,7 +102,7 @@ pub fn deinit(self: *Client) void {
 pub fn getVirtualMachine(self: *Client, subscription: []const u8, group: []const u8, name: []const u8) Error!types.Owned(types.VirtualMachine) {
     self.engine.begin();
     try self.checkGroup(subscription, group);
-    if (!isVmName(name)) return self.refuse("a VM's name is 1 to 64 of letters, digits and .-_, beginning with a letter or digit and ending with one or _", .{});
+    if (!isVmName(name)) return self.refuse(spec_.vm_name_rule, .{});
     var out: types.Owned(types.VirtualMachine) = try .init(self.gpa);
     errdefer out.deinit();
     const a = out.arena.allocator();
@@ -141,6 +145,105 @@ pub fn listVirtualMachines(self: *Client, subscription: []const u8, scope: types
     }
     out.value = vms.items;
     return out;
+}
+
+// Writes.
+
+/// A write to one VM: what `preview` shows, and what the `begin` calls
+/// send.
+pub const Write = union(enum) {
+    create: spec_.VmSpec,
+    /// A body of the caller's own, a JSON object as Compute's create takes
+    /// it, for what `VmSpec` has no field for. Sent as given.
+    create_raw: []const u8,
+    delete: DeleteOptions,
+    deallocate,
+    start,
+    restart,
+    simulate_eviction,
+};
+
+pub const DeleteOptions = struct {
+    /// `forceDeletion`: no graceful shutdown first, so the VM goes sooner,
+    /// as a spot worker's end wants.
+    force: bool = false,
+};
+
+/// Begins making the VM `name` from `spec`, and returns the operation to
+/// wait on (`waitOperation`). The PUT carries `If-None-Match: *`, so it
+/// never updates a VM there already: that is 412 `PreconditionFailed`, as
+/// m0 measured, whether the VM is running or still being made.
+///
+/// When the PUT meets a VM (412), or its answer is lost (a timeout, a 5xx
+/// after the loop's retries), the client reads the VM. One that carries
+/// `spec.attempt_tag` is this create's own, landed by an earlier attempt,
+/// and the operation follows its `provisioningState`; any other is
+/// `PreconditionFailed`. Without an attempt tag a VM there is always
+/// `PreconditionFailed`. So a create is made once, however often it is
+/// tried (the plan's decision 2).
+///
+/// A refusal's kind is `RefusalClass.ofDiagnostics`. An allocation the
+/// operation reports failed (`AllocationFailed`) leaves the VM there,
+/// `State.isFailed`, until the caller deletes it (decision 3).
+pub fn beginCreateVirtualMachine(self: *Client, subscription: []const u8, group: []const u8, name: []const u8, spec: spec_.VmSpec) Error!types.Owned(Operation) {
+    return self.beginWrite(subscription, group, name, .{ .create = spec }, spec.attempt_tag);
+}
+
+/// As `beginCreateVirtualMachine`, from a body of the caller's own: a JSON
+/// object, sent as given. `attempt_tag` is the tag in it, if any, that
+/// marks this attempt.
+pub fn beginCreateVirtualMachineRaw(self: *Client, subscription: []const u8, group: []const u8, name: []const u8, body: []const u8, attempt_tag: ?types.Tag) Error!types.Owned(Operation) {
+    return self.beginWrite(subscription, group, name, .{ .create_raw = body }, attempt_tag);
+}
+
+/// Begins deleting the VM, with its OS disk and NIC where their delete
+/// option says so, as `VmSpec`'s do, and returns the operation to wait on.
+/// A VM that is not there has nothing to delete: the operation has
+/// succeeded already.
+pub fn beginDeleteVirtualMachine(self: *Client, subscription: []const u8, group: []const u8, name: []const u8, options: DeleteOptions) Error!types.Owned(Operation) {
+    return self.beginWrite(subscription, group, name, .{ .delete = options }, null);
+}
+
+/// Begins stopping the VM and releasing its host: no compute charge until
+/// started again. A VM with an ephemeral OS disk cannot be deallocated.
+pub fn beginDeallocateVirtualMachine(self: *Client, subscription: []const u8, group: []const u8, name: []const u8) Error!types.Owned(Operation) {
+    return self.beginWrite(subscription, group, name, .deallocate, null);
+}
+
+pub fn beginStartVirtualMachine(self: *Client, subscription: []const u8, group: []const u8, name: []const u8) Error!types.Owned(Operation) {
+    return self.beginWrite(subscription, group, name, .start, null);
+}
+
+pub fn beginRestartVirtualMachine(self: *Client, subscription: []const u8, group: []const u8, name: []const u8) Error!types.Owned(Operation) {
+    return self.beginWrite(subscription, group, name, .restart, null);
+}
+
+/// Has Azure evict the spot VM as it would for want of capacity. Compute
+/// answers at once (204, measured); the VM's Scheduled Events show a
+/// `Preempt`, and under eviction policy Delete the VM is gone some time
+/// later, its NIC with it (87 s, measured).
+pub fn simulateEviction(self: *Client, subscription: []const u8, group: []const u8, name: []const u8) Error!void {
+    var op = try self.beginWrite(subscription, group, name, .simulate_eviction, null);
+    op.deinit();
+}
+
+/// Polls `operation` until it ends or `timeout_ms` passes, and leaves it as
+/// it then stands; a failed one is an answer, in its `state`, with ARM's
+/// code and message in `failure_code` and `failure_message`
+/// (`RefusalClass.ofOperation` reads them).
+pub fn waitOperation(self: *Client, operation: *types.Owned(Operation), timeout_ms: u32) Error!void {
+    self.engine.begin();
+    core.operation.wait(self.engine, operation.arena.allocator(), &operation.value, timeout_ms) catch |err| return operationError(err);
+}
+
+/// The request `write` sends, built without sending it: its method, URL
+/// and body, byte for byte, in `arena`. Headers are not part of it, a
+/// create's `If-None-Match` among them, so neither is a token; a create's
+/// body carries `custom_data` and `user_data`, as base64.
+pub fn preview(self: *Client, arena: Allocator, subscription: []const u8, group: []const u8, name: []const u8, write: Write) Error!core.PreparedRequest {
+    self.engine.begin();
+    const call = try self.build(arena, subscription, group, name, write);
+    return core.PreparedRequest.fromCall(arena, self.engine.base_url, .{ .method = call.method, .path = call.path, .body = call.body });
 }
 
 // Sizes, zones and quotas.
@@ -207,6 +310,146 @@ pub fn listUsages(self: *Client, subscription: []const u8, location: []const u8)
     return out;
 }
 
+// What the writes share.
+
+/// A write's request, before it is sent.
+const Built = struct {
+    method: transport.Method,
+    path: []const u8,
+    body: ?[]const u8 = null,
+};
+
+/// Checks a write's names and spec, and builds its request in `arena`.
+fn build(self: *Client, arena: Allocator, subscription: []const u8, group: []const u8, name: []const u8, write: Write) Error!Built {
+    try self.checkGroup(subscription, group);
+    if (!isVmName(name)) return self.refuse(spec_.vm_name_rule, .{});
+    const vm = "/subscriptions/{s}/resourceGroups/{s}/providers/Microsoft.Compute/virtualMachines/{s}";
+    const query = "?api-version=" ++ api_version;
+    const args = .{ subscription, group, name };
+    const force = switch (write) {
+        .delete => |o| if (o.force) "&forceDeletion=true" else "",
+        else => "",
+    };
+    return switch (write) {
+        .create => |spec| create: {
+            try spec_.check(spec, name, self.engine.diagnostics);
+            var w: std.Io.Writer.Allocating = .init(arena);
+            var jw: std.json.Stringify = .{ .writer = &w.writer };
+            spec_.write(&jw, spec, name) catch return error.OutOfMemory;
+            break :create .{ .method = .PUT, .path = try std.fmt.allocPrint(arena, vm ++ query, args), .body = w.written() };
+        },
+        .create_raw => |body| raw: {
+            const value = std.json.parseFromSliceLeaky(std.json.Value, arena, body, .{}) catch |err| switch (err) {
+                error.OutOfMemory => return error.OutOfMemory,
+                else => return self.refuse("a raw create's body is a JSON object", .{}),
+            };
+            if (value != .object) return self.refuse("a raw create's body is a JSON object", .{});
+            break :raw .{ .method = .PUT, .path = try std.fmt.allocPrint(arena, vm ++ query, args), .body = body };
+        },
+        .delete => .{ .method = .DELETE, .path = try std.fmt.allocPrint(arena, vm ++ query ++ "{s}", .{ subscription, group, name, force }) },
+        .deallocate => .{ .method = .POST, .path = try std.fmt.allocPrint(arena, vm ++ "/deallocate" ++ query, args) },
+        .start => .{ .method = .POST, .path = try std.fmt.allocPrint(arena, vm ++ "/start" ++ query, args) },
+        .restart => .{ .method = .POST, .path = try std.fmt.allocPrint(arena, vm ++ "/restart" ++ query, args) },
+        .simulate_eviction => .{ .method = .POST, .path = try std.fmt.allocPrint(arena, vm ++ "/simulateEviction" ++ query, args) },
+    };
+}
+
+/// Sends a write and returns how its operation stands. The request is
+/// built over a wiping allocator, since a create's body may carry what its
+/// custom data hides.
+fn beginWrite(self: *Client, subscription: []const u8, group: []const u8, name: []const u8, write: Write, attempt_tag: ?types.Tag) Error!types.Owned(Operation) {
+    self.engine.begin();
+    var wiping: core.WipingAllocator = .init(self.gpa);
+    var scratch: std.heap.ArenaAllocator = .init(wiping.allocator());
+    defer scratch.deinit();
+    const call = try self.build(scratch.allocator(), subscription, group, name, write);
+    var out: types.Owned(Operation) = try .init(self.gpa);
+    errdefer out.deinit();
+    const id = core.arm.clientRequestId(self.io);
+    const headers = [_]transport.Header{
+        .{ .name = "x-ms-client-request-id", .value = &id },
+        .{ .name = "If-None-Match", .value = "*" },
+    };
+    const create = call.method == .PUT;
+    const segments = [_][]const u8{call.body orelse ""};
+    if (core.operation.begin(self.engine, out.arena.allocator(), .{
+        .method = call.method,
+        .path = call.path,
+        .content_type = if (call.body != null) "application/json" else null,
+        .headers = if (create) &headers else headers[0..1],
+        .body = if (call.body != null) .{ .segments = &segments } else .none,
+    }, .{})) |op| {
+        out.value = op;
+    } else |err| {
+        const e = operationError(err);
+        if (!create) return e;
+        try self.claim(&out, call.path, e, attempt_tag orelse return e);
+    }
+    return out;
+}
+
+/// How long a claimed create waits between reads of its VM: what
+/// Compute's create asks in `Retry-After` (10 s, measured).
+const claim_delay_ms = 10_000;
+
+/// After a create's PUT met a VM of the name, or lost its answer: when the
+/// VM is there with `attempt_tag`, it is this create's own, and `out` is
+/// set to follow its `provisioningState`. Otherwise returns `err`, or
+/// `PreconditionFailed` for a VM that is another's.
+fn claim(self: *Client, out: *types.Owned(Operation), path: []const u8, err: Error, attempt_tag: types.Tag) Error!void {
+    if (!self.mayBeThere(err)) return err;
+    const saved: ?core.Diagnostics = if (self.engine.diagnostics) |d| d.* else null;
+    const a = out.arena.allocator();
+    const body = self.get(a, path) catch |get_err| {
+        if (get_err == error.OutOfMemory) return error.OutOfMemory;
+        // The VM cannot be read, or is not there: the PUT's failure stands.
+        if (saved) |s| self.engine.diagnostics.?.* = s;
+        return err;
+    };
+    const raw = std.json.parseFromSliceLeaky(RawVm, a, body, json_options) catch |decode_err| return self.decodeFailed(decode_err, "a VM");
+    const vm = try vmOf(a, raw);
+    const value = vm.tag(attempt_tag.name) orelse "";
+    if (!std.mem.eql(u8, value, attempt_tag.value)) {
+        if (err == error.PreconditionFailed) {
+            if (saved) |s| self.engine.diagnostics.?.* = s;
+        } else if (self.engine.diagnostics) |d| {
+            d.print("a VM named {s} is there already, and not this create's: its tag {s} is not {s}", .{ vm.name, attempt_tag.name, attempt_tag.value });
+        }
+        return error.PreconditionFailed;
+    }
+    const state = core.arm.operationState(raw.properties.provisioningState);
+    out.value = .{
+        .method = .PUT,
+        .resource_path = try a.dupe(u8, path),
+        .follow = .provisioning_state,
+        .poll_path = try a.dupe(u8, path),
+        .options = .{},
+        .state = state,
+        .delay_ms = claim_delay_ms,
+        .final_body = if (state == .running) "" else body,
+    };
+    if (self.engine.diagnostics) |d| d.clear();
+}
+
+/// Whether a create's PUT that failed with `err` may have met, or made, a
+/// VM: a 412, an answer lost, or a 409 that is no refusal of a kind
+/// `RefusalClass` knows (a quota's or capacity's comes before any VM).
+fn mayBeThere(self: *Client, err: Error) bool {
+    return switch (err) {
+        error.PreconditionFailed, error.ServerError, error.RequestTimeout => true,
+        error.TimedOut, error.ConnectionResetByPeer, error.ConnectionTimedOut, error.HttpProtocolError, error.NetworkFailure => true,
+        error.Conflict => if (self.engine.diagnostics) |d| types.RefusalClass.ofDiagnostics(d) == .other else true,
+        else => false,
+    };
+}
+
+fn operationError(err: core.operation.Error(Engine)) Error {
+    return switch (err) {
+        error.WriteFailed => unreachable,
+        else => |e| e,
+    };
+}
+
 // The wire.
 
 const json_options: std.json.ParseOptions = .{ .ignore_unknown_fields = true, .allocate = .alloc_always };
@@ -230,6 +473,7 @@ const RawVm = struct {
         provisioningState: []const u8 = "",
         hardwareProfile: struct { vmSize: []const u8 = "" } = .{},
         instanceView: ?struct { statuses: []const RawStatus = &.{} } = null,
+        networkProfile: ?struct { networkInterfaces: []const struct { id: []const u8 = "" } = &.{} } = null,
     };
 };
 
@@ -248,7 +492,15 @@ fn vmOf(a: Allocator, r: RawVm) Allocator.Error!types.VirtualMachine {
         .state = stateOf(p.provisioningState, if (p.instanceView) |v| v.statuses else null),
         .time_created = p.timeCreated,
         .tags = try tagsOf(a, r.tags),
+        .nics = try nicsOf(a, p.networkProfile),
     };
+}
+
+fn nicsOf(a: Allocator, profile: anytype) Allocator.Error![]const []const u8 {
+    const p = profile orelse return &.{};
+    const ids = try a.alloc([]const u8, p.networkInterfaces.len);
+    for (p.networkInterfaces, ids) |n, *id| id.* = n.id;
+    return ids;
 }
 
 /// The state, from the instance view's statuses when there are some
@@ -309,7 +561,36 @@ fn sizeOf(a: Allocator, r: RawSku, location: []const u8) Allocator.Error!?types.
         .ephemeral_os_disk = isTrue(r.capability("EphemeralOSDiskSupported")),
         .resource_disk_mb = std.fmt.parseInt(u64, r.capability("MaxResourceVolumeMB") orelse "0", 10) catch 0,
         .zones = zones,
+        .disk_controllers = controllersOf(r.capability("DiskControllerTypes")),
+        .ephemeral_placements = placementsOf(r.capability("SupportedEphemeralOSDiskPlacements")),
+        .nvme_disk_mb = std.fmt.parseInt(u64, r.capability("NvmeDiskSizeInMiB") orelse "0", 10) catch 0,
+        .trusted_launch = !isTrue(r.capability("TrustedLaunchDisabled")),
     };
+}
+
+/// `DiskControllerTypes`, a list as `SCSI,NVMe`: SCSI alone where there
+/// is none, as for v5's sizes.
+fn controllersOf(value: ?[]const u8) types.DiskControllers {
+    const list = value orelse return .{};
+    var out: types.DiskControllers = .{ .scsi = false };
+    var it = std.mem.tokenizeAny(u8, list, ", ");
+    while (it.next()) |item| {
+        if (std.ascii.eqlIgnoreCase(item, "SCSI")) out.scsi = true;
+        if (std.ascii.eqlIgnoreCase(item, "NVMe")) out.nvme = true;
+    }
+    return out;
+}
+
+/// `SupportedEphemeralOSDiskPlacements`, a list as `ResourceDisk,CacheDisk`.
+fn placementsOf(value: ?[]const u8) types.EphemeralPlacements {
+    var out: types.EphemeralPlacements = .{};
+    var it = std.mem.tokenizeAny(u8, value orelse "", ", ");
+    while (it.next()) |item| {
+        if (std.ascii.eqlIgnoreCase(item, "ResourceDisk")) out.resource_disk = true;
+        if (std.ascii.eqlIgnoreCase(item, "CacheDisk")) out.cache_disk = true;
+        if (std.ascii.eqlIgnoreCase(item, "NvmeDisk")) out.nvme_disk = true;
+    }
+    return out;
 }
 
 /// The zones a size's restrictions take away, or null when one takes the
@@ -395,14 +676,7 @@ fn get(self: *Client, arena: Allocator, path: []const u8) Error![]const u8 {
 
 /// 1 to 64 of letters, digits and `.-_`, beginning with a letter or digit
 /// and ending with one or `_`: a Linux VM's name, as it goes in the path.
-pub fn isVmName(name: []const u8) bool {
-    if (name.len == 0 or name.len > 64) return false;
-    if (!std.ascii.isAlphanumeric(name[0])) return false;
-    const last = name[name.len - 1];
-    if (!std.ascii.isAlphanumeric(last) and last != '_') return false;
-    for (name) |c| if (!(std.ascii.isAlphanumeric(c) or c == '.' or c == '-' or c == '_')) return false;
-    return true;
-}
+pub const isVmName = spec_.isVmName;
 
 fn checkGroup(self: *Client, subscription: []const u8, group: []const u8) Error!void {
     if (core.names.groupProblem(subscription, group)) |why| return self.refuse("{s}", .{why});
