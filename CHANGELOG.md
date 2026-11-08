@@ -83,6 +83,14 @@ Until 1.0, minor versions may break the API; each entry says how.
   `auth.testing.FakeEntra` answers as Entra did when measured; the cache
   is after gcp.zig's, and its form encoder is gcp.zig's. Run against Entra
   ID and az 2.92.0 on 2026-11-07.
+- `compute`, its reads (m1): a VM with its state typed from the instance
+  view (provisioning, power, a failed allocation's code), VMs listed by
+  group, subscription or region with a tag filter on the client, the
+  sizes a region offers the subscription from Resource SKUs (a size with
+  a Location restriction left out, its zones less the restricted ones),
+  `sizesThatFit` a shape, locations with their zone mappings, and usages,
+  the spot quota among them. `compute.testing.FakeCompute` holds what
+  t19's m0 measured on 2026-11-07. Run against Azure the same day.
 - `storage`: Blob Storage at x-ms-version 2026-04-06: containers made,
   read and deleted; block blobs written in one request, read whole or in
   part, read for their properties, listed over every page (a prefix,

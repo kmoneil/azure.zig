@@ -1,0 +1,97 @@
+{
+  "name": "m0-vm1",
+  "id": "/subscriptions/00000000-0000-4000-8000-0000000000aa/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/m0-vm1",
+  "type": "Microsoft.Compute/virtualMachines",
+  "location": "eastus2",
+  "tags": {
+    "azzig-run": "1a2b3c4d",
+    "azzig-created": "1794085630",
+    "azzig-job": "m0"
+  },
+  "properties": {
+    "hardwareProfile": {
+      "vmSize": "Standard_D2ds_v5"
+    },
+    "provisioningState": "Creating",
+    "vmId": "e325759d-777e-4939-8bd5-cf5907da55d0",
+    "storageProfile": {
+      "imageReference": {
+        "publisher": "Canonical",
+        "offer": "ubuntu-24_04-lts",
+        "sku": "server",
+        "version": "latest",
+        "exactVersion": "24.04.202610250"
+      },
+      "osDisk": {
+        "osType": "Linux",
+        "diffDiskSettings": {
+          "option": "Local",
+          "placement": "ResourceDisk"
+        },
+        "createOption": "FromImage",
+        "caching": "ReadOnly",
+        "managedDisk": {
+          "storageAccountType": "Standard_LRS"
+        },
+        "deleteOption": "Delete",
+        "diskSizeGB": 30
+      },
+      "dataDisks": [],
+      "diskControllerType": "SCSI"
+    },
+    "osProfile": {
+      "computerName": "m0-vm1",
+      "linuxConfiguration": {
+        "disablePasswordAuthentication": true,
+        "ssh": {
+          "publicKeys": [
+            {
+              "path": "/home/azzig/.ssh/authorized_keys",
+              "keyData": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleKeyForTests azzig"
+            }
+          ]
+        },
+        "provisionVMAgent": true,
+        "patchSettings": {
+          "patchMode": "ImageDefault",
+          "assessmentMode": "ImageDefault"
+        },
+        "enableVMAgentPlatformUpdates": true
+      },
+      "secrets": [],
+      "allowExtensionOperations": true,
+      "requireGuestProvisionSignal": true,
+      "adminUsername": "azzig"
+    },
+    "securityProfile": {
+      "uefiSettings": {
+        "secureBootEnabled": true,
+        "vTpmEnabled": true
+      },
+      "securityType": "TrustedLaunch"
+    },
+    "networkProfile": {
+      "networkInterfaces": [
+        {
+          "id": "/subscriptions/00000000-0000-4000-8000-0000000000aa/resourceGroups/rg/providers/Microsoft.Network/networkInterfaces/m0-vm1-nic-10e88ade",
+          "properties": {
+            "primary": true,
+            "deleteOption": "Delete"
+          }
+        }
+      ]
+    },
+    "diagnosticsProfile": {
+      "bootDiagnostics": {
+        "enabled": true
+      }
+    },
+    "priority": "Spot",
+    "evictionPolicy": "Delete",
+    "billingProfile": {
+      "maxPrice": -1.0
+    },
+    "timeCreated": "2026-11-07T21:07:11.5157622+00:00"
+  },
+  "etag": "\"1\""
+}
